@@ -32,11 +32,16 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
+      - name: Build release APK (recommended for phones)
+        run: gradle assembleRelease --no-daemon --stacktrace
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: xcontroller-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
       - name: Publish APK to release
@@ -47,4 +52,6 @@ jobs:
           body: |
             X Controller — Universal Keyboard & Mouse Gaming App (prototype).
             Direct download: https://github.com/${{ github.repository }}/releases/latest/download/app-debug.apk
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
