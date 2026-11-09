@@ -36,7 +36,7 @@ public class UiKit {
         return v;
     }
 
-    public static TextView body(Context c, String t, int size, int color) {
+    public static TextView body(Context c, String t, float size, int color) {
         TextView v = new TextView(c);
         v.setText(t);
         v.setTextColor(color);
