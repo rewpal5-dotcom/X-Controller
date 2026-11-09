@@ -10,8 +10,8 @@ android {
         applicationId = "com.xcontroller.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.1"
+        versionCode = 4
+        versionName = "2.2"
     }
 
     // Har build same key se sign hoti hai, taaki naya version purane ke upar install ho sake.
@@ -22,6 +22,10 @@ android {
             keyAlias = "xcontroller"
             keyPassword = "xcontroller123"
             storeType = "PKCS12"
+            // purane installers ke liye v1 bhi, aur modern ke liye v2/v3
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 
