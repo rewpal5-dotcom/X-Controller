@@ -10,14 +10,29 @@ android {
         applicationId = "com.xcontroller.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "2.1"
+    }
+
+    // Har build same key se sign hoti hai, taaki naya version purane ke upar install ho sake.
+    signingConfigs {
+        create("xkey") {
+            storeFile = file("xcontroller.p12")
+            storePassword = "xcontroller123"
+            keyAlias = "xcontroller"
+            keyPassword = "xcontroller123"
+            storeType = "PKCS12"
+        }
     }
 
     buildTypes {
-        debug { isMinifyEnabled = false }
+        debug {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("xkey")
+        }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("xkey")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

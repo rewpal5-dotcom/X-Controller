@@ -77,7 +77,7 @@ public class OverlayService extends Service {
                 .setContentIntent(pi)
                 .setOngoing(true);
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= 34) {
             startForeground(7, b.build(),
                     android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         } else {
