@@ -26,12 +26,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * OverlayService — game ke upar chalta hua floating controller.
- *
- * Kaam:
- *  1. Game ke upar chhota panel dikhana (jo hilaya ja sakta hai)
- *  2. Keyboard ki keys pakadna (jab "KEY" mode on ho)
- *  3. Har key ko profile ke point par tap gesture mein badalna
+ * OverlayService — game ke upar floating controller.
+ * Panel: ✥ drag · KEY on/off · ✎ edit · ⏸ pause · ✕ close
  */
 public class OverlayService extends Service {
 
@@ -39,10 +35,11 @@ public class OverlayService extends Service {
     private static OverlayService instance;
 
     private WindowManager wm;
-    private ControllerView view;
+    private PanelView view;
     private WindowManager.LayoutParams params;
     private ProfileStore.Profile profile;
     private boolean keyMode = true;
+    private boolean paused = false;
 
     public static OverlayService get() { return instance; }
 
@@ -62,21 +59,20 @@ public class OverlayService extends Service {
             if (nm != null) {
                 NotificationChannel ch = new NotificationChannel(channelId, "X Controller",
                         NotificationManager.IMPORTANCE_LOW);
-                ch.setDescription("Floating controller chal raha hai");
                 nm.createNotificationChannel(ch);
             }
         }
-        Intent open = new Intent(this, MainActivity.class);
         int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 : PendingIntent.FLAG_UPDATE_CURRENT;
-        PendingIntent pi = PendingIntent.getActivity(this, 0, open, flags);
+        PendingIntent pi = PendingIntent.getActivity(this, 0,
+                new Intent(this, MainActivity.class), flags);
 
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, channelId)
                 : new Notification.Builder(this);
         b.setContentTitle("X Controller chal raha hai")
-                .setContentText("Floating panel screen par hai — band karne ke liye ✕ dabayein")
+                .setContentText("Floating panel screen par hai")
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setContentIntent(pi)
                 .setOngoing(true);
@@ -95,23 +91,21 @@ public class OverlayService extends Service {
         profile = store.active();
 
         DisplayMetrics dm = getResources().getDisplayMetrics();
-        int w = dm.widthPixels;
-        int h = dm.heightPixels;
+        int w = dm.widthPixels, h = dm.heightPixels;
 
-        view = new ControllerView(this, profile, w, h);
-        view.setKeyListener(new ControllerView.KeyListener() {
-            @Override
-            public void onKey(String keyName) {
-                handleKey(keyName);
-            }
-            @Override
+        view = new PanelView(this, profile, w, h);
+        view.listener = new PanelView.Listener() {
+            public void onKey(String key) { handleKey(key); }
             public void onClose() { stopSelf(); }
-            @Override
-            public void onToggleKeyMode() {
-                keyMode = !keyMode;
-                view.setKeyMode(keyMode);
+            public void onToggle() { keyMode = !keyMode; view.keyMode = keyMode; view.invalidate(); }
+            public void onPause() { paused = !paused; view.paused = paused; view.invalidate(); }
+            public void onEdit() {
+                Intent i = new Intent(OverlayService.this, LayoutActivity.class);
+                i.putExtra("profile", profile == null ? "" : profile.name);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
             }
-        });
+        };
 
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -121,38 +115,28 @@ public class OverlayService extends Service {
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 type,
-                // focusable (key events pane) + NOT_TOUCH_MODAL (baaki screen game ko jaaye)
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
-        params.x = 0;
-        params.y = 0;
 
-        try {
-            wm.addView(view, params);
-        } catch (Exception ignored) { }
+        try { wm.addView(view, params); } catch (Exception ignored) { }
     }
 
     private void handleKey(String keyName) {
-        if (!keyMode) return;
-        if (profile == null) return;
+        if (!keyMode || paused || profile == null) return;
         ProfileStore.Binding b = profile.find(keyName);
         if (b == null) return;
         KeyAccessibilityService svc = KeyAccessibilityService.get();
         if (svc == null) return;
         DisplayMetrics dm = getResources().getDisplayMetrics();
-        float x = b.x * dm.widthPixels;
-        float y = b.y * dm.heightPixels;
-        svc.tap(x, y);
+        svc.tap(b.x * dm.widthPixels, b.y * dm.heightPixels);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && intent.getBooleanExtra("stop", false)) {
-            stopSelf();
-        }
+        if (intent != null && intent.getBooleanExtra("stop", false)) stopSelf();
         return START_STICKY;
     }
 
@@ -169,82 +153,95 @@ public class OverlayService extends Service {
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
-    /* ==================== floating view ==================== */
-    public static class ControllerView extends FrameLayout {
+    /* ==================== floating panel ==================== */
+    static class PanelView extends FrameLayout {
 
-        public interface KeyListener {
-            void onKey(String keyName);
+        interface Listener {
+            void onKey(String key);
             void onClose();
-            void onToggleKeyMode();
+            void onToggle();
+            void onPause();
+            void onEdit();
         }
 
+        Listener listener;
+        boolean keyMode = true;
+        boolean paused = false;
+
+        private final List<ProfileStore.Binding> bindings = new ArrayList<>();
         private final Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint panel = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint chip = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
-        private final List<ProfileStore.Binding> bindings = new ArrayList<>();
         private final int screenW, screenH;
-        private float handleX = 40, handleY = 140;
-        private boolean draggingHandle = false;
+        private final float opacity, btnScale;
+        private float barX = 24, barY = 130;
+        private boolean draggingBar = false;
         private float dragDX, dragDY;
-        private boolean keyMode = true;
-        private KeyListener listener;
 
-        public ControllerView(Context ctx, ProfileStore.Profile profile, int w, int h) {
-            super(ctx);
-            screenW = w;
-            screenH = h;
-            if (profile != null) bindings.addAll(profile.bindings);
+        PanelView(Context c, ProfileStore.Profile p, int w, int h) {
+            super(c);
+            screenW = w; screenH = h;
+            if (p != null) {
+                bindings.addAll(p.bindings);
+                opacity = p.buttonOpacity;
+                btnScale = p.buttonSize;
+            } else {
+                opacity = 0.85f; btnScale = 1f;
+            }
             setWillNotDraw(false);
             setFocusable(true);
             setFocusableInTouchMode(true);
 
-            dot.setColor(Color.parseColor("#6622D3EE"));
-            dot.setStyle(Paint.Style.FILL);
-            label.setColor(Color.parseColor("#CC22D3EE"));
-            label.setStyle(Paint.Style.STROKE);
-            label.setStrokeWidth(3f);
-            panel.setColor(Color.parseColor("#CC0B0F17"));
-            text.setColor(Color.WHITE);
-            text.setTextSize(34f);
-            text.setAntiAlias(true);
+            int alpha = (int) (255 * opacity);
+            dot.setColor(Color.argb((int) (alpha * 0.35), 34, 211, 238));
+            ring.setColor(Color.argb(alpha, 34, 211, 238));
+            ring.setStyle(Paint.Style.STROKE);
+            ring.setStrokeWidth(4f);
+            label.setColor(Color.argb(alpha, 255, 255, 255));
+            label.setTextAlign(Paint.Align.CENTER);
+            label.setTextSize(30f);
+            panel.setColor(Color.argb(220, 7, 11, 18));
+            chip.setColor(Color.argb(255, 34, 211, 238));
         }
-
-        public void setKeyListener(KeyListener l) { listener = l; }
-
-        public void setKeyMode(boolean on) { keyMode = on; invalidate(); }
 
         @Override
         protected void onDraw(Canvas c) {
             super.onDraw(c);
-            float r = 46f;
 
-            // mapped points
+            float base = 46f * btnScale;
             for (ProfileStore.Binding b : bindings) {
-                float x = b.x * getWidth();
-                float y = b.y * getHeight();
-                c.drawCircle(x, y, r, dot);
-                c.drawCircle(x, y, r, label);
-                Paint p = new Paint(text);
-                p.setTextSize(28f);
-                p.setTextAlign(Paint.Align.CENTER);
-                c.drawText(b.key, x, y + 10f, p);
+                float x = b.x * getWidth(), y = b.y * getHeight(), rad = base * b.size;
+                c.drawCircle(x, y, rad, dot);
+                c.drawCircle(x, y, rad, ring);
+                Paint tp = new Paint(label);
+                tp.setTextSize(rad * 0.6f);
+                c.drawText(b.key, x, y + rad * 0.2f, tp);
             }
 
-            // draggable handle
-            rect.set(handleX, handleY, handleX + 240, handleY + 96);
+            // top bar
+            rect.set(barX, barY, barX + 430, barY + 92);
             c.drawRoundRect(rect, 26, 26, panel);
-            Paint hp = new Paint(text);
-            hp.setTextSize(34f);
-            hp.setColor(Color.parseColor("#22D3EE"));
-            c.drawText("✥ X", handleX + 20, handleY + 60, hp);
-            hp.setColor(keyMode ? Color.parseColor("#22C55E") : Color.parseColor("#EF4444"));
-            hp.setTextSize(26f);
-            c.drawText(keyMode ? "KEY ON" : "KEY OFF", handleX + 110, handleY + 58, hp);
-            hp.setColor(Color.parseColor("#EF4444"));
-            hp.setTextSize(34f);
-            c.drawText("✕", handleX + 205, handleY + 60, hp);
+
+            Paint p = new Paint(label);
+            p.setTextSize(32f);
+            p.setColor(UiKit.ACCENT);
+            c.drawText("✥", barX + 42, barY + 60, p);
+
+            p.setColor(keyMode ? UiKit.GREEN : UiKit.RED);
+            p.setTextSize(24f);
+            c.drawText(keyMode ? "KEY ON" : "KEY OFF", barX + 108, barY + 57, p);
+
+            p.setColor(paused ? UiKit.AMBER : UiKit.TEXT);
+            c.drawText(paused ? "⏸ PAUSED" : "⏸", barX + 250, barY + 57, p);
+
+            p.setColor(UiKit.TEXT);
+            c.drawText("✎", barX + 336, barY + 57, p);
+
+            p.setColor(UiKit.RED);
+            c.drawText("✕", barX + 398, barY + 57, p);
         }
 
         @Override
@@ -252,33 +249,31 @@ public class OverlayService extends Service {
             float x = e.getX(), y = e.getY();
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    if (x >= handleX && x <= handleX + 240 && y >= handleY && y <= handleY + 96) {
-                        if (x > handleX + 185) {              // ✕ close
-                            if (listener != null) listener.onClose();
-                        } else if (x > handleX + 100) {       // KEY toggle
-                            if (listener != null) listener.onToggleKeyMode();
-                        } else {                              // drag
-                            draggingHandle = true;
-                            dragDX = x - handleX;
-                            dragDY = y - handleY;
+                    if (x >= barX && x <= barX + 430 && y >= barY && y <= barY + 92) {
+                        if (x > barX + 370) { if (listener != null) listener.onClose(); }
+                        else if (x > barX + 300) { if (listener != null) listener.onEdit(); }
+                        else if (x > barX + 210) { if (listener != null) listener.onPause(); }
+                        else if (x > barX + 80) { if (listener != null) listener.onToggle(); }
+                        else {
+                            draggingBar = true;
+                            dragDX = x - barX; dragDY = y - barY;
                         }
                         return true;
                     }
                     return false;
                 case MotionEvent.ACTION_MOVE:
-                    if (draggingHandle) {
-                        handleX = Math.max(0, Math.min(screenW - 240, x - dragDX));
-                        handleY = Math.max(0, Math.min(screenH - 96, y - dragDY));
+                    if (draggingBar) {
+                        barX = Math.max(0, Math.min(screenW - 430, x - dragDX));
+                        barY = Math.max(0, Math.min(screenH - 92, y - dragDY));
                         invalidate();
                         return true;
                     }
                     return false;
                 case MotionEvent.ACTION_UP:
-                    draggingHandle = false;
+                    draggingBar = false;
                     return true;
-                default:
-                    return super.onTouchEvent(e);
             }
+            return super.onTouchEvent(e);
         }
 
         @Override
@@ -291,13 +286,33 @@ public class OverlayService extends Service {
             return super.onKeyDown(keyCode, event);
         }
 
+        @Override
+        public boolean onGenericMotionEvent(MotionEvent e) {
+            int action = e.getActionMasked();
+            if (action == MotionEvent.ACTION_BUTTON_PRESS) {
+                int btn = e.getButtonState();
+                String name = null;
+                if ((btn & MotionEvent.BUTTON_PRIMARY) != 0) name = "MOUSE_LEFT";
+                else if ((btn & MotionEvent.BUTTON_SECONDARY) != 0) name = "MOUSE_RIGHT";
+                else if ((btn & MotionEvent.BUTTON_TERTIARY) != 0) name = "MOUSE_MIDDLE";
+                if (name != null && listener != null) {
+                    listener.onKey(name);
+                    return true;
+                }
+            }
+            if (action == MotionEvent.ACTION_SCROLL) {
+                float v = e.getAxisValue(MotionEvent.AXIS_VSCROLL);
+                if (listener != null) listener.onKey(v > 0 ? "SCROLL_UP" : "SCROLL_DOWN");
+                return true;
+            }
+            return super.onGenericMotionEvent(e);
+        }
+
         private String keyName(int code) {
-            if (code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z) {
+            if (code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z)
                 return String.valueOf((char) ('A' + (code - KeyEvent.KEYCODE_A)));
-            }
-            if (code >= KeyEvent.KEYCODE_0 && code <= KeyEvent.KEYCODE_9) {
+            if (code >= KeyEvent.KEYCODE_0 && code <= KeyEvent.KEYCODE_9)
                 return String.valueOf((char) ('0' + (code - KeyEvent.KEYCODE_0)));
-            }
             switch (code) {
                 case KeyEvent.KEYCODE_SPACE: return "SPACE";
                 case KeyEvent.KEYCODE_SHIFT_LEFT:
@@ -309,6 +324,10 @@ public class OverlayService extends Service {
                 case KeyEvent.KEYCODE_ENTER: return "ENTER";
                 case KeyEvent.KEYCODE_TAB: return "TAB";
                 case KeyEvent.KEYCODE_ESCAPE: return "ESC";
+                case KeyEvent.KEYCODE_DPAD_UP: return "UP";
+                case KeyEvent.KEYCODE_DPAD_DOWN: return "DOWN";
+                case KeyEvent.KEYCODE_DPAD_LEFT: return "LEFT";
+                case KeyEvent.KEYCODE_DPAD_RIGHT: return "RIGHT";
                 default: return null;
             }
         }
