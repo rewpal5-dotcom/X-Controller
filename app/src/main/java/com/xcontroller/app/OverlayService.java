@@ -15,6 +15,7 @@ import android.graphics.RectF;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -198,7 +199,7 @@ public class OverlayService extends Service {
                 public void onFire() { handleKey("MOUSE_LEFT"); }
             };
             aimParams = new WindowManager.LayoutParams(
-                    profile.aimZone.equals("full") ? WindowManager.LayoutParams.MATCH_PARENT : (int) (w * 0.45f),
+                    profile.aimZone.equals("full") ? WindowManager.LayoutParams.MATCH_PARENT : (int) (w * 0.38f),
                     WindowManager.LayoutParams.MATCH_PARENT,
                     type,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -218,10 +219,10 @@ public class OverlayService extends Service {
         if (profile == null) return;
         KeyAccessibilityService svc = KeyAccessibilityService.get();
         if (svc == null) return;
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        float cx = profile.joyX * dm.widthPixels;
-        float cy = profile.joyY * dm.heightPixels;
-        float r = profile.joyR * dm.widthPixels;
+        int[] sc = screen();
+        float cx = profile.joyX * sc[0];
+        float cy = profile.joyY * sc[1];
+        float r = profile.joyR * sc[0];
         float tx = cx + dx * r;
         float ty = cy + dy * r;
         if (!joyActive) {
@@ -246,14 +247,14 @@ public class OverlayService extends Service {
         if (profile == null) return;
         KeyAccessibilityService svc = KeyAccessibilityService.get();
         if (svc == null) return;
-        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int[] sc = screen();
         float sens = Math.max(0.4f, profile.aimSensitivity / 50f);
-        float cx = dm.widthPixels * 0.72f;
-        float cy = dm.heightPixels * 0.45f;
+        float cx = sc[0] * 0.72f;
+        float cy = sc[1] * 0.45f;
         float sx = cx - dx * 2.2f * sens;
         float sy = cy - dy * 2.2f * sens;
-        sx = Math.max(dm.widthPixels * 0.55f, Math.min(dm.widthPixels - 8, sx));
-        sy = Math.max(8, Math.min(dm.heightPixels - 8, sy));
+        sx = Math.max(sc[0] * 0.55f, Math.min(sc[0] - 8, sx));
+        sy = Math.max(8, Math.min(sc[1] - 8, sy));
         svc.swipe(cx, cy, sx, sy, 55);
     }
 
@@ -433,14 +434,41 @@ public class OverlayService extends Service {
         }
     }
 
+    /** Asli screen size (rotation ke baad bhi sahi). */
+    private int[] screen() {
+        DisplayMetrics dm = new DisplayMetrics();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.view.WindowMetrics wmtr = wm.getCurrentWindowMetrics();
+            android.graphics.Rect b = wmtr.getBounds();
+            return new int[]{b.width(), b.height()};
+        } else {
+            wm.getDefaultDisplay().getRealMetrics(dm);
+            return new int[]{dm.widthPixels, dm.heightPixels};
+        }
+    }
+
+    private boolean dispatching = false;
+
     private void handleKey(String keyName) {
         if (editMode || !keyMode || profile == null) return;
+        if (dispatching) return;          // recursion guard (aim pad → fire → aim pad)
+        dispatching = true;
+        try {
+            doHandleKey(keyName);
+        } finally {
+            dispatching = false;
+        }
+    }
+
+    private void doHandleKey(String keyName) {
         ProfileStore.Binding b = profile.find(keyName);
         if (b == null) return;
         KeyAccessibilityService svc = KeyAccessibilityService.get();
         if (svc == null) return;
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        svc.tap(b.x * dm.widthPixels, b.y * dm.heightPixels);
+        int[] sc = screen();
+        float px = b.x * sc[0], py = b.y * sc[1];
+        Log.d("XController", "key " + keyName + " -> tap(" + (int) px + "," + (int) py + ") screen " + sc[0] + "x" + sc[1]);
+        svc.tap(px, py);
     }
 
     public static final String ACTION_RELOAD = "com.xcontroller.app.RELOAD";
@@ -467,6 +495,13 @@ public class OverlayService extends Service {
         profile = store.active();
         if (profile == null) { stopSelf(); return; }
         showOverlay();
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        Log.d("XController", "configuration changed -> reload overlay");
+        reload();
     }
 
     @Override
