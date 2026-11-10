@@ -39,6 +39,16 @@ public class ProfileStore {
         public float buttonOpacity = 0.85f;
         public String orientation = "auto";   // auto / portrait / landscape
 
+        // virtual joystick (gol circle wala movement control)
+        public boolean joystick = true;
+        public float joyX = 0.16f, joyY = 0.78f;   // centre (0..1)
+        public float joyR = 0.11f;                 // radius (screen width ka hissa)
+
+        // mouse aim (mouse hilane par camera ghumana — swipe se)
+        public boolean aimEnabled = true;
+        public String aimZone = "right";           // right / full
+        public int aimSensitivity = 50;
+
         public Profile() {}
         public Profile(String name) { this.name = name; }
 
@@ -80,6 +90,12 @@ public class ProfileStore {
                 p.buttonSize = (float) o.optDouble("btnSize", 1.0);
                 p.buttonOpacity = (float) o.optDouble("btnOpacity", 0.85);
                 p.orientation = o.optString("orient", "auto");
+                p.joystick = o.optBoolean("joy", true);
+                p.joyX = (float) o.optDouble("joyX", 0.16);
+                p.joyY = (float) o.optDouble("joyY", 0.78);
+                p.joyR = (float) o.optDouble("joyR", 0.11);
+                p.aimEnabled = o.optBoolean("aim", true);
+                p.aimZone = o.optString("aimZone", "right");
                 JSONArray bs = o.optJSONArray("bindings");
                 if (bs != null) {
                     for (int j = 0; j < bs.length(); j++) {
@@ -112,6 +128,12 @@ public class ProfileStore {
                 o.put("btnSize", p.buttonSize);
                 o.put("btnOpacity", p.buttonOpacity);
                 o.put("orient", p.orientation);
+                o.put("joy", p.joystick);
+                o.put("joyX", p.joyX);
+                o.put("joyY", p.joyY);
+                o.put("joyR", p.joyR);
+                o.put("aim", p.aimEnabled);
+                o.put("aimZone", p.aimZone);
                 JSONArray bs = new JSONArray();
                 for (Binding b : p.bindings) {
                     JSONObject bo = new JSONObject();

@@ -81,6 +81,24 @@ public class KeyAccessibilityService extends AccessibilityService {
         }
     }
 
+    /** Joystick jaisa stroke — ek point se doosre tak, dabaye rakhte hue. */
+    public void stroke(float x1, float y1, float x2, float y2, long durationMs) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;
+        Path path = new Path();
+        path.moveTo(x1, y1);
+        path.lineTo(x2, y2);
+        GestureDescription.StrokeDescription stroke =
+                new GestureDescription.StrokeDescription(path, 0, Math.max(80, durationMs));
+        GestureDescription gesture = new GestureDescription.Builder()
+                .addStroke(stroke)
+                .build();
+        try {
+            dispatchGesture(gesture, null, null);
+        } catch (Exception e) {
+            Log.w(TAG, "stroke failed: " + e.getMessage());
+        }
+    }
+
     /** Do point ke beech swipe (jaise camera ghumana). */
     public void swipe(float x1, float y1, float x2, float y2, long durationMs) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return;

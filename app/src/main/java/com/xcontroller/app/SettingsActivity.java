@@ -46,6 +46,38 @@ public class SettingsActivity extends Activity {
         c.addView(inv, UiKit.matchWrap(10));
         box.addView(c);
 
+        LinearLayout cJoy = UiKit.card(this);
+        cJoy.addView(UiKit.title(this, "Joystick (gol circle)", 15));
+        Switch joy = new Switch(this);
+        joy.setText("Virtual joystick dikhayein");
+        joy.setTextColor(UiKit.TEXT);
+        joy.setChecked(profile.joystick);
+        joy.setOnCheckedChangeListener((v, on) -> { profile.joystick = on; save(); });
+        cJoy.addView(joy, UiKit.matchWrap(8));
+        cJoy.addView(UiKit.muted(this,
+                "Game ke upar gol joystick — ungli/ghuma kar chalayein.\n"
+              + "Overlay ke EDIT mode mein ise jahan chahein le jaayein."));
+        cJoy.addView(slider("Joystick size", Math.round(profile.joyR * 400), v -> {
+            profile.joyR = Math.max(0.06f, Math.min(0.20f, v / 400f)); save();
+        }));
+        box.addView(cJoy);
+
+        LinearLayout cAim = UiKit.card(this);
+        cAim.addView(UiKit.title(this, "Mouse aim", 15));
+        Switch aim = new Switch(this);
+        aim.setText("Mouse hilane par camera ghumayein");
+        aim.setTextColor(UiKit.TEXT);
+        aim.setChecked(profile.aimEnabled);
+        aim.setOnCheckedChangeListener((v, on) -> { profile.aimEnabled = on; save(); });
+        cAim.addView(aim, UiKit.matchWrap(8));
+        cAim.addView(slider("Aim sensitivity", profile.aimSensitivity, v -> {
+            profile.aimSensitivity = v; save();
+        }));
+        cAim.addView(UiKit.muted(this,
+                "Mouse move → swipe gesture. Har game mein poori tarah kaam nahi karta;\n"
+              + "jo game native mouse support dete hain wahan behtar chalta hai."));
+        box.addView(cAim);
+
         LinearLayout c2 = UiKit.card(this);
         c2.addView(UiKit.title(this, "Button look", 15));
         c2.addView(slider("Button size", Math.round(profile.buttonSize * 50), v -> {

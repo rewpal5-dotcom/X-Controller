@@ -41,7 +41,9 @@ public class OverlayService extends Service {
     private WindowManager wm;
     private PanelView panel;
     private BubbleView bubble;
-    private WindowManager.LayoutParams panelParams, bubbleParams;
+    private JoystickView joystick;
+    private AimPadView aimPad;
+    private WindowManager.LayoutParams panelParams, bubbleParams, joyParams, aimParams;
 
     private ProfileStore store;
     private ProfileStore.Profile profile;
@@ -147,6 +149,85 @@ public class OverlayService extends Service {
         bubbleParams.y = Math.max(120, h / 3);
 
         try { wm.addView(bubble, bubbleParams); } catch (Exception ignored) { }
+
+        /* ---- joystick (gol circle wala movement control) ---- */
+        if (profile.joystick) {
+            joystick = new JoystickView(this, profile, w, h);
+            joystick.callback = new JoystickView.Callback() {
+                public void onMove(float dx, float dy) { moveBy(dx, dy); }
+                public void onRelease() { stopMoving(); }
+                public void onPosition(float nx, float ny) {
+                    profile.joyX = nx; profile.joyY = ny; store.upsert(profile);
+                }
+            };
+            joyParams = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            joyParams.gravity = Gravity.TOP | Gravity.START;
+            joyParams.x = (int) (profile.joyX * w);
+            joyParams.y = (int) (profile.joyY * h);
+            try { wm.addView(joystick, joyParams); } catch (Exception ignored) { }
+        }
+
+        /* ---- mouse aim pad (mouse hilane par camera ghumana) ---- */
+        if (profile.aimEnabled) {
+            aimPad = new AimPadView(this, profile, w, h);
+            aimPad.callback = new AimPadView.Callback() {
+                public void onMove(float dx, float dy) { aimBy(dx, dy); }
+                public void onFire() { handleKey("MOUSE_LEFT"); }
+            };
+            aimParams = new WindowManager.LayoutParams(
+                    profile.aimZone.equals("full") ? WindowManager.LayoutParams.MATCH_PARENT : (int) (w * 0.62f),
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            aimParams.gravity = Gravity.TOP | Gravity.END;
+            try { wm.addView(aimPad, aimParams); } catch (Exception ignored) { }
+        }
+    }
+
+    /* ---- joystick movement: game ke joystick par stroke bhejo ---- */
+    private void moveBy(float dx, float dy) {
+        if (profile == null) return;
+        KeyAccessibilityService svc = KeyAccessibilityService.get();
+        if (svc == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        float cx = profile.joyX * dm.widthPixels;
+        float cy = profile.joyY * dm.heightPixels;
+        float r = profile.joyR * dm.widthPixels;
+        float tx = cx + dx * r;
+        float ty = cy + dy * r;
+        svc.stroke(cx, cy, tx, ty, 220);
+    }
+
+    private void stopMoving() {
+        KeyAccessibilityService svc = KeyAccessibilityService.get();
+        if (svc == null || profile == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        svc.tap(profile.joyX * dm.widthPixels, profile.joyY * dm.heightPixels);
+    }
+
+    /* ---- mouse aim: mouse ka movement swipe gesture mein badlo ---- */
+    private void aimBy(float dx, float dy) {
+        if (profile == null) return;
+        KeyAccessibilityService svc = KeyAccessibilityService.get();
+        if (svc == null) return;
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        float sens = Math.max(0.4f, profile.aimSensitivity / 50f);
+        float cx = dm.widthPixels * 0.72f;
+        float cy = dm.heightPixels * 0.45f;
+        float sx = cx - dx * 2.2f * sens;
+        float sy = cy - dy * 2.2f * sens;
+        sx = Math.max(dm.widthPixels * 0.55f, Math.min(dm.widthPixels - 8, sx));
+        sy = Math.max(8, Math.min(dm.heightPixels - 8, sy));
+        svc.swipe(cx, cy, sx, sy, 55);
     }
 
     private void setEditMode(boolean on) {
@@ -185,6 +266,8 @@ public class OverlayService extends Service {
         instance = null;
         try { if (panel != null) wm.removeView(panel); } catch (Exception ignored) { }
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
+        try { if (joystick != null) wm.removeView(joystick); } catch (Exception ignored) { }
+        try { if (aimPad != null) wm.removeView(aimPad); } catch (Exception ignored) { }
         super.onDestroy();
     }
 
@@ -598,4 +681,159 @@ public class OverlayService extends Service {
             }
         }
     }
+
+    /* ===================== joystick (gol circle) ===================== */
+    static class JoystickView extends View {
+        interface Callback {
+            void onMove(float dx, float dy);
+            void onRelease();
+            void onPosition(float nx, float ny);
+        }
+        Callback callback;
+        private final ProfileStore.Profile profile;
+        private final int screenW, screenH;
+        private final int radius;
+        private final Paint base = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint knob = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float kx, ky;
+        private boolean dragging = false, movingKnob = false;
+        private float downRawX, downRawY;
+        private long lastSend = 0;
+
+        JoystickView(Context c, ProfileStore.Profile p, int w, int h) {
+            super(c);
+            profile = p; screenW = w; screenH = h;
+            radius = (int) Math.max(70, p.joyR * w);
+            base.setColor(0x66101822);
+            ring.setColor(0xCC22D3EE);
+            ring.setStyle(Paint.Style.STROKE);
+            ring.setStrokeWidth(5f);
+            knob.setColor(0xE622D3EE);
+            txt.setColor(0xCCFFFFFF);
+            txt.setTextAlign(Paint.Align.CENTER);
+            txt.setTextSize(radius * 0.22f);
+            kx = 0; ky = 0;
+        }
+
+        @Override
+        protected void onMeasure(int wspec, int hspec) {
+            setMeasuredDimension(radius * 2, radius * 2);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float r = radius;
+            c.drawCircle(r, r, r - 6, base);
+            c.drawCircle(r, r, r - 6, ring);
+            c.drawCircle(r + kx, r + ky, r * 0.42f, knob);
+            Paint p = new Paint(txt);
+            c.drawText("MOVE", r, r * 2 - 14, p);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) getLayoutParams();
+            WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+            float r = radius;
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downRawX = e.getRawX(); downRawY = e.getRawY();
+                    dragging = true; movingKnob = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE: {
+                    float dx = e.getX() - r, dy = e.getY() - r;
+                    float dist = (float) Math.sqrt(dx * dx + dy * dy);
+                    if (!movingKnob && dist > r * 0.75f) movingKnob = true;
+                    if (movingKnob) {
+                        float max = r * 0.62f;
+                        if (dist > max) { dx = dx / dist * max; dy = dy / dist * max; }
+                        kx = dx; ky = dy;
+                        invalidate();
+                        long now = System.currentTimeMillis();
+                        if (now - lastSend > 110) {
+                            lastSend = now;
+                            if (callback != null) callback.onMove(kx / max, ky / max);
+                        }
+                    } else if (dragging) {
+                        // poora joystick shift karo
+                        lp.x = (int) (e.getRawX() - r);
+                        lp.y = (int) (e.getRawY() - r);
+                        try { wm.updateViewLayout(this, lp); } catch (Exception ignored) { }
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    if (movingKnob && callback != null) callback.onRelease();
+                    if (!movingKnob && callback != null) {
+                        callback.onPosition(lp.x / (float) screenW, lp.y / (float) screenH);
+                    }
+                    kx = 0; ky = 0; invalidate();
+                    dragging = false; movingKnob = false;
+                    return true;
+            }
+            return super.onTouchEvent(e);
+        }
+    }
+
+    /* ===================== mouse aim pad ===================== */
+    static class AimPadView extends View {
+        interface Callback {
+            void onMove(float dx, float dy);
+            void onFire();
+        }
+        Callback callback;
+        private float lastX = -1, lastY = -1;
+        private long lastSend = 0;
+        private final Paint hint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        AimPadView(Context c, ProfileStore.Profile p, int w, int h) {
+            super(c);
+            setBackgroundColor(Color.TRANSPARENT);
+            hint.setColor(0x33FFFFFF);
+            hint.setTextSize(28f);
+            hint.setTextAlign(Paint.Align.CENTER);
+        }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            super.onDraw(c);
+            c.drawText("AIM", getWidth() / 2f, 60, hint);
+        }
+
+        @Override
+        public boolean onGenericMotionEvent(MotionEvent e) {
+            int action = e.getActionMasked();
+            if (action == MotionEvent.ACTION_HOVER_MOVE || action == MotionEvent.ACTION_MOVE) {
+                float x = e.getX(), y = e.getY();
+                if (lastX >= 0) {
+                    float dx = x - lastX, dy = y - lastY;
+                    long now = System.currentTimeMillis();
+                    if (Math.abs(dx) + Math.abs(dy) > 1.5f && now - lastSend > 35) {
+                        lastSend = now;
+                        if (callback != null) callback.onMove(dx, dy);
+                    }
+                }
+                lastX = x; lastY = y;
+                return true;
+            }
+            if (action == MotionEvent.ACTION_BUTTON_PRESS) {
+                if (callback != null) callback.onFire();
+                return true;
+            }
+            return super.onGenericMotionEvent(e);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                if (callback != null) callback.onFire();
+                return true;
+            }
+            return super.onTouchEvent(e);
+        }
+    }
+
 }
