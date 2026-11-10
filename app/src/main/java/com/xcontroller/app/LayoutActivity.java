@@ -65,6 +65,25 @@ public class LayoutActivity extends Activity {
         bottom.addView(bigger);
         bottom.addView(UiKit.spacer(this, 10, 1));
 
+        Button keyBtn = UiKit.button(this, "Key", 0xFF1B2636, UiKit.TEXT);
+        keyBtn.setOnClickListener(v -> {
+            if (canvas.selected < 0) {
+                Toast.makeText(this, "Pehle koi button chunein", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            final ProfileStore.Binding b = profile.bindings.get(canvas.selected);
+            final String[] keys = {"W","A","S","D","E","F","Q","R","SPACE","SHIFT","CTRL","TAB",
+                    "MOUSE_LEFT","MOUSE_RIGHT","SCROLL_UP","SCROLL_DOWN"};
+            new AlertDialog.Builder(this).setTitle("Key badlein").setItems(keys, (d, w) -> {
+                b.key = keys[w];
+                store.upsert(profile);
+                canvas.invalidate();
+                Toast.makeText(this, "Key: " + keys[w], Toast.LENGTH_SHORT).show();
+            }).setNegativeButton("Cancel", null).show();
+        });
+        bottom.addView(keyBtn);
+        bottom.addView(UiKit.spacer(this, 10, 1));
+
         Button test = UiKit.button(this, "Test", 0xFF123542, UiKit.ACCENT);
         test.setLayoutParams(UiKit.weight(1f));
         test.setOnClickListener(v -> {

@@ -5,7 +5,9 @@ import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.DisplayMetrics;
 import android.text.InputType;
 import android.widget.Button;
 import android.widget.EditText;
@@ -57,7 +59,11 @@ public class MappingActivity extends Activity {
         box.addView(list);
 
         LinearLayout row = UiKit.row(this);
-        Button add = UiKit.button(this, "+  Key add", UiKit.ACCENT, 0xFF04121A);
+        Button capture = UiKit.button(this, "⌨  Key dabayein (auto detect)", UiKit.PURPLE, 0xFFFFFFFF);
+        capture.setOnClickListener(v -> captureKey());
+        box.addView(capture, UiKit.matchWrap(6));
+
+        Button add = UiKit.button(this, "+  Key list se chunein", UiKit.ACCENT, 0xFF04121A);
         add.setLayoutParams(UiKit.weight(1f));
         add.setOnClickListener(v -> addKey());
         row.addView(add);
@@ -115,8 +121,28 @@ public class MappingActivity extends Activity {
             row.addView(a);
             c.addView(row);
 
+            c.addView(UiKit.muted(this, "jagah: " + Math.round(b.x * 100) + "% , " + Math.round(b.y * 100) + "%"));
+
             LinearLayout acts = UiKit.row(this);
             acts.setPadding(0, 14, 0, 0);
+
+            Button test = UiKit.button(this, "Test", 0xFF123542, UiKit.ACCENT);
+            test.setLayoutParams(UiKit.weight(1f));
+            test.setOnClickListener(v -> {
+                KeyAccessibilityService svc = KeyAccessibilityService.get();
+                if (svc == null) {
+                    android.widget.Toast.makeText(this, "Accessibility ON nahi hai",
+                            android.widget.Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                int[] sc = screenSize();
+                svc.tap(b.x * sc[0], b.y * sc[1]);
+                android.widget.Toast.makeText(this, "Tap bheja: " + Math.round(b.x * 100) + "%, "
+                        + Math.round(b.y * 100) + "%", android.widget.Toast.LENGTH_SHORT).show();
+            });
+            acts.addView(test);
+            acts.addView(UiKit.spacer(this, 12, 1));
+
             Button ch = UiKit.button(this, "Change", 0xFF1B2636, UiKit.TEXT);
             ch.setLayoutParams(UiKit.weight(1f));
             ch.setOnClickListener(v -> changeKey(b));
@@ -129,6 +155,65 @@ public class MappingActivity extends Activity {
             c.addView(acts);
             list.addView(c);
         }
+    }
+
+    /** Asli keyboard se key pakdo — jo dabayein wahi key save hogi (koi mismatch nahi). */
+    private void captureKey() {
+        final android.app.Dialog d = new android.app.Dialog(this);
+        android.widget.TextView tv = new android.widget.TextView(this);
+        tv.setText("Ab keyboard par koi key dabayein…\n(wahi key is button se jud jayegi)");
+        tv.setTextSize(18f);
+        tv.setPadding(60, 80, 60, 80);
+        tv.setGravity(android.view.Gravity.CENTER);
+        tv.setFocusableInTouchMode(true);
+        tv.setOnKeyListener((v, code, ev) -> {
+            if (ev.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                String name = keyNameOf(code);
+                if (name != null) {
+                    addBinding(name);
+                    d.dismiss();
+                    return true;
+                }
+            }
+            return false;
+        });
+        d.setContentView(tv);
+        d.show();
+        tv.requestFocus();
+    }
+
+    /** Overlay ke keyName() jaisa hi mapping — dono jagah same naam. */
+    private String keyNameOf(int code) {
+        if (code >= android.view.KeyEvent.KEYCODE_A && code <= android.view.KeyEvent.KEYCODE_Z)
+            return String.valueOf((char) ('A' + (code - android.view.KeyEvent.KEYCODE_A)));
+        if (code >= android.view.KeyEvent.KEYCODE_0 && code <= android.view.KeyEvent.KEYCODE_9)
+            return String.valueOf((char) ('0' + (code - android.view.KeyEvent.KEYCODE_0)));
+        switch (code) {
+            case android.view.KeyEvent.KEYCODE_SPACE: return "SPACE";
+            case android.view.KeyEvent.KEYCODE_SHIFT_LEFT:
+            case android.view.KeyEvent.KEYCODE_SHIFT_RIGHT: return "SHIFT";
+            case android.view.KeyEvent.KEYCODE_CTRL_LEFT:
+            case android.view.KeyEvent.KEYCODE_CTRL_RIGHT: return "CTRL";
+            case android.view.KeyEvent.KEYCODE_ALT_LEFT:
+            case android.view.KeyEvent.KEYCODE_ALT_RIGHT: return "ALT";
+            case android.view.KeyEvent.KEYCODE_TAB: return "TAB";
+            case android.view.KeyEvent.KEYCODE_ENTER: return "ENTER";
+            case android.view.KeyEvent.KEYCODE_ESCAPE: return "ESC";
+            default: return null;
+        }
+    }
+
+    /** Ek hi key dobara add na ho — purani update ho jaaye. */
+    private void addBinding(String key) {
+        ProfileStore.Binding existing = profile.find(key);
+        if (existing != null) {
+            android.widget.Toast.makeText(this, key + " pehle se hai — usi ko update kiya",
+                    android.widget.Toast.LENGTH_SHORT).show();
+            pickAction(existing);
+            return;
+        }
+        ProfileStore.Binding b = new ProfileStore.Binding(key, 0.5f, 0.5f, "");
+        pickAction(b);
     }
 
     private void addKey() {
@@ -166,6 +251,16 @@ public class MappingActivity extends Activity {
                     }
                 })
                 .setNegativeButton("Cancel", null).show();
+    }
+
+    private int[] screenSize() {
+        DisplayMetrics dm = new DisplayMetrics();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.graphics.Rect r = getWindowManager().getCurrentWindowMetrics().getBounds();
+            return new int[]{r.width(), r.height()};
+        }
+        getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+        return new int[]{dm.widthPixels, dm.heightPixels};
     }
 
     private void save() {
