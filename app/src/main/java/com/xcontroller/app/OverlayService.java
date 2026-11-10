@@ -310,7 +310,7 @@ public class OverlayService extends Service {
         menu.addView(menuBtn("close", "✕  Controller band karein", false));
 
         menuParams = new WindowManager.LayoutParams(
-                (int) (250 * getResources().getDisplayMetrics().density),
+                (int) (210 * getResources().getDisplayMetrics().density),
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -344,7 +344,8 @@ public class OverlayService extends Service {
         v.setTag(id);
         v.setOnClickListener(x -> {
             String tag = String.valueOf(v.getTag());
-            if (tag.equals("master")) toggleMaster();
+            if (tag.equals("master")) { toggleMaster(); }
+            if (!tag.equals("edit")) hideMenu();
             else if (tag.equals("keyboard")) {
                 profile.keyCapture = !profile.keyCapture; store.upsert(profile);
                 setKeyCapture(profile.keyCapture); refreshMenu();
@@ -741,9 +742,9 @@ public class OverlayService extends Service {
                 c.drawText(b.key, x, y + r * 0.18f, tp);
             }
 
-            if (!editMode) return;
+            return;
 
-            /* ---- edit toolbar ---- */
+            /* ---- edit toolbar (ab use nahi hota) ---- */
             float barH = 96, top = 26;
             rect.set(20, top, getWidth() - 20, top + barH);
             c.drawRoundRect(rect, 26, 26, bar);
@@ -1162,15 +1163,15 @@ public class OverlayService extends Service {
         FireButtonView(Context c, ProfileStore.Profile p) {
             super(c);
             profile = p;
-            radius = (int) Math.max(60, p.fireR * c.getResources().getDisplayMetrics().widthPixels);
-            fill.setColor(0x88EF4444);
+            radius = (int) Math.max(34, Math.min(70, p.fireR * c.getResources().getDisplayMetrics().widthPixels));
+            fill.setColor(0x99EF4444);
             ring.setColor(0xFFEF4444);
             ring.setStyle(Paint.Style.STROKE);
-            ring.setStrokeWidth(6f);
+            ring.setStrokeWidth(5f);
             txt.setColor(0xFFFFFFFF);
             txt.setTextAlign(Paint.Align.CENTER);
             txt.setFakeBoldText(true);
-            txt.setTextSize(radius * 0.38f);
+            txt.setTextSize(radius * 0.34f);
         }
 
         @Override

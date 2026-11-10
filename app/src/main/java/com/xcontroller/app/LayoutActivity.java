@@ -91,6 +91,12 @@ public class LayoutActivity extends Activity {
         updateInfo();
     }
 
+    @Override
+    public void onBackPressed() {
+        store.upsert(profile);
+        super.onBackPressed();
+    }
+
     private void updateInfo() {
         if (info != null) info.setText(profile.bindings.size() + " controls");
     }
