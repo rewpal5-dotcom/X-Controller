@@ -10,8 +10,8 @@ android {
         applicationId = "com.xcontroller.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 13
-        versionName = "6.1"
+        versionCode = 14
+        versionName = "7.0"
     }
 
     // Har build same key se sign hoti hai, taaki naya version purane ke upar install ho sake.

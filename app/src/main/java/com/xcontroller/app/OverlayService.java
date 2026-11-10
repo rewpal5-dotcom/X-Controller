@@ -48,6 +48,8 @@ public class OverlayService extends Service {
     private BubbleView bubble;
     private JoystickView joystick;
     private AimPadView aimPad;
+    private FireButtonView fireBtn;
+    private WindowManager.LayoutParams fireParams;
     private LinearLayout menu;
     private WindowManager.LayoutParams panelParams, bubbleParams, joyParams, aimParams, menuParams;
     private boolean masterOn = false;   // jab tak user ON na kare, phone normal chalta rahe
@@ -191,6 +193,34 @@ public class OverlayService extends Service {
             joystick.setVisibility(View.GONE);
         }
 
+        /* ---- FIRE button (mouse firing) ---- */
+        if (profile.fireBtn) {
+            fireBtn = new FireButtonView(this, profile);
+            fireBtn.callback = new FireButtonView.Callback() {
+                public void onFireDown() {
+                    KeyAccessibilityService svc = KeyAccessibilityService.get();
+                    if (svc == null) return;
+                    int[] sc = screen();
+                    svc.tap(profile.fireX * sc[0], profile.fireY * sc[1]);
+                }
+                public void onMoved(float nx, float ny) {
+                    profile.fireX = nx; profile.fireY = ny; store.upsert(profile);
+                }
+            };
+            fireParams = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            fireParams.gravity = Gravity.TOP | Gravity.START;
+            fireParams.x = (int) (profile.fireX * w);
+            fireParams.y = (int) (profile.fireY * h);
+            try { wm.addView(fireBtn, fireParams); } catch (Exception ignored) { }
+            fireBtn.setVisibility(View.GONE);
+        }
+
         /* ---- mouse aim pad (mouse hilane par camera ghumana) ---- */
         if (profile.aimEnabled) {   // default OFF — full-screen touch layer games ko rok deta hai
             aimPad = new AimPadView(this, profile, w, h);
@@ -275,6 +305,7 @@ public class OverlayService extends Service {
         menu.addView(menuBtn("keyboard", "⌨  Keyboard: " + onOff(profile.keyCapture), false));
         menu.addView(menuBtn("mouse", "🖱  Mouse: " + onOff(profile.aimEnabled), false));
         menu.addView(menuBtn("joystick", "🕹  Joystick: " + onOff(profile.joystick), false));
+        menu.addView(menuBtn("fire", "🔥  Fire button: " + onOff(profile.fireBtn), false));
         menu.addView(menuBtn("edit", "✎  Layout edit karein", false));
         menu.addView(menuBtn("close", "✕  Controller band karein", false));
 
@@ -320,6 +351,9 @@ public class OverlayService extends Service {
             } else if (tag.equals("mouse")) {
                 profile.aimEnabled = !profile.aimEnabled; store.upsert(profile);
                 reload(); refreshMenu();
+            } else if (tag.equals("fire")) {
+                profile.fireBtn = !profile.fireBtn; store.upsert(profile);
+                reload(); refreshMenu();
             } else if (tag.equals("joystick")) {
                 profile.joystick = !profile.joystick; store.upsert(profile);
                 reload(); refreshMenu();
@@ -345,6 +379,7 @@ public class OverlayService extends Service {
             } else if (tag.equals("keyboard")) tv.setText("⌨  Keyboard: " + onOff(profile.keyCapture));
             else if (tag.equals("mouse")) tv.setText("🖱  Mouse: " + onOff(profile.aimEnabled));
             else if (tag.equals("joystick")) tv.setText("🕹  Joystick: " + onOff(profile.joystick));
+            else if (tag.equals("fire")) tv.setText("🔥  Fire button: " + onOff(profile.fireBtn));
         }
     }
 
@@ -372,6 +407,7 @@ public class OverlayService extends Service {
         masterOn = on;
         if (panel != null) panel.setVisibility(on ? View.VISIBLE : View.GONE);
         if (joystick != null) joystick.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (fireBtn != null) fireBtn.setVisibility(on ? View.VISIBLE : View.GONE);
         if (aimPad != null) aimPad.setVisibility(on ? View.VISIBLE : View.GONE);
         if (bubble != null) { bubble.masterOn = on; bubble.invalidate(); }
         if (!on) {
@@ -488,8 +524,11 @@ public class OverlayService extends Service {
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
         try { if (joystick != null) wm.removeView(joystick); } catch (Exception ignored) { }
         try { if (aimPad != null) wm.removeView(aimPad); } catch (Exception ignored) { }
+        try { if (fireBtn != null) wm.removeView(fireBtn); } catch (Exception ignored) { }
         try { if (menu != null) wm.removeView(menu); } catch (Exception ignored) { }
         try { if (keySink != null) wm.removeView(keySink); } catch (Exception ignored) { }
+        try { if (fireBtn != null) wm.removeView(fireBtn); } catch (Exception ignored) { }
+        fireBtn = null;
         panel = null; bubble = null; joystick = null; aimPad = null; keySink = null;
         editMode = false;
         profile = store.active();
@@ -512,6 +551,7 @@ public class OverlayService extends Service {
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
         try { if (joystick != null) wm.removeView(joystick); } catch (Exception ignored) { }
         try { if (aimPad != null) wm.removeView(aimPad); } catch (Exception ignored) { }
+        try { if (fireBtn != null) wm.removeView(fireBtn); } catch (Exception ignored) { }
         try { if (menu != null) wm.removeView(menu); } catch (Exception ignored) { }
         super.onDestroy();
     }
@@ -622,13 +662,17 @@ public class OverlayService extends Service {
         private long downAt;
         private float downX, downY;
         private boolean chooserOpen = false;
-        private String pendingKeyTarget = null;
+        private ProfileStore.Binding pendingBinding = null;
 
         private static final String[] KEY_CHOICES = {
-                "W", "A", "S", "D", "SPACE", "SHIFT", "CTRL", "ALT",
-                "R", "F", "E", "Q", "TAB", "ESC", "1", "2",
-                "MOUSE_LEFT", "MOUSE_RIGHT", "SCROLL_UP", "SCROLL_DOWN"
+                "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
+                "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
+                "U", "V", "W", "X", "Y", "Z", "1", "2", "3", "4",
+                "5", "6", "7", "8", "9", "0", "SPACE", "SHIFT", "CTRL", "ALT",
+                "TAB", "ENTER", "ESC", "MOUSE_LEFT", "MOUSE_RIGHT",
+                "MOUSE_MIDDLE", "SCROLL_UP", "SCROLL_DOWN"
         };
+        private static final int COLS = 5;
 
         PanelView(Context c, ProfileStore.Profile p, int w, int h) {
             super(c);
@@ -749,19 +793,20 @@ public class OverlayService extends Service {
 
             /* ---- key chooser ---- */
             if (chooserOpen) {
-                float gw = getWidth() - 80;
-                float cell = gw / 4f;
-                float startY = getHeight() / 2f - cell * 2.5f;
-                rect.set(40, startY - 40, getWidth() - 40, startY + cell * 5 + 40);
+                float gw = getWidth() - 40;
+                float cell = gw / COLS;
+                int rows = (KEY_CHOICES.length + COLS - 1) / COLS;
+                float startY = Math.max(120, getHeight() / 2f - (rows * cell) / 2f);
+                rect.set(20, startY - 40, getWidth() - 20, startY + rows * cell + 40);
                 Paint bgp = new Paint(bar);
                 bgp.setColor(0xF0070B12);
                 c.drawRoundRect(rect, 26, 26, bgp);
                 Paint kp = new Paint(label);
-                kp.setTextSize(cell * 0.24f);
+                kp.setTextSize(cell * 0.22f);
                 kp.setColor(Color.WHITE);
                 for (int i = 0; i < KEY_CHOICES.length; i++) {
-                    int row = i / 4, col = i % 4;
-                    float cx = 40 + col * cell + cell / 2f;
+                    int row = i / COLS, col = i % COLS;
+                    float cx = 20 + col * cell + cell / 2f;
                     float cy = startY + row * cell + cell / 2f;
                     c.drawText(KEY_CHOICES[i], cx, cy, kp);
                 }
@@ -779,18 +824,16 @@ public class OverlayService extends Service {
                     downX = x; downY = y;
 
                     if (chooserOpen) {
-                        float gw = getWidth() - 80, cell = gw / 4f;
-                        float startY = getHeight() / 2f - cell * 2.5f;
-                        int col = (int) ((x - 40) / cell);
+                        float gw = getWidth() - 40, cell = gw / COLS;
+                        int rows = (KEY_CHOICES.length + COLS - 1) / COLS;
+                        float startY = Math.max(120, getHeight() / 2f - (rows * cell) / 2f);
+                        int col = (int) ((x - 20) / cell);
                         int row = (int) ((y - startY) / cell);
-                        int idx = row * 4 + col;
-                        if (col >= 0 && col < 4 && row >= 0 && row < 5 && idx < KEY_CHOICES.length) {
-                            if (pendingKeyTarget != null) {
-                                ProfileStore.Binding b = find(pendingKeyTarget);
-                                if (b != null) b.key = KEY_CHOICES[idx];
-                            }
+                        int idx = row * COLS + col;
+                        if (col >= 0 && col < COLS && row >= 0 && row < rows && idx < KEY_CHOICES.length) {
+                            if (pendingBinding != null) pendingBinding.key = KEY_CHOICES[idx];
                             chooserOpen = false;
-                            pendingKeyTarget = null;
+                            pendingBinding = null;
                             if (callback != null) callback.onChanged();
                             invalidate();
                             return true;
@@ -831,7 +874,7 @@ public class OverlayService extends Service {
                             }
                             if (x > getWidth() - 196 && x < getWidth() - 140) {
                                 chooserOpen = true;
-                                pendingKeyTarget = b.key;
+                                pendingBinding = b;
                                 invalidate();
                                 return true;
                             }
@@ -866,7 +909,7 @@ public class OverlayService extends Service {
                         bindings.add(nb);
                         selected = bindings.size() - 1;
                         chooserOpen = true;
-                        pendingKeyTarget = nb.key;
+                        pendingBinding = nb;
                         if (callback != null) callback.onChanged();
                         invalidate();
                         return true;
@@ -1095,6 +1138,76 @@ public class OverlayService extends Service {
                     }
                     kx = 0; ky = 0; invalidate();
                     dragging = false; movingKnob = false;
+                    return true;
+            }
+            return super.onTouchEvent(e);
+        }
+    }
+
+    /* ===================== FIRE button ===================== */
+    static class FireButtonView extends View {
+        interface Callback {
+            void onFireDown();
+            void onMoved(float nx, float ny);
+        }
+        Callback callback;
+        private final ProfileStore.Profile profile;
+        private final int radius;
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean dragging = false;
+        private long downAt;
+
+        FireButtonView(Context c, ProfileStore.Profile p) {
+            super(c);
+            profile = p;
+            radius = (int) Math.max(60, p.fireR * c.getResources().getDisplayMetrics().widthPixels);
+            fill.setColor(0x88EF4444);
+            ring.setColor(0xFFEF4444);
+            ring.setStyle(Paint.Style.STROKE);
+            ring.setStrokeWidth(6f);
+            txt.setColor(0xFFFFFFFF);
+            txt.setTextAlign(Paint.Align.CENTER);
+            txt.setFakeBoldText(true);
+            txt.setTextSize(radius * 0.38f);
+        }
+
+        @Override
+        protected void onMeasure(int ws, int hs) { setMeasuredDimension(radius * 2, radius * 2); }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float r = radius;
+            c.drawCircle(r, r, r - 6, fill);
+            c.drawCircle(r, r, r - 6, ring);
+            c.drawText("FIRE", r, r + radius * 0.14f, txt);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) getLayoutParams();
+            WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downAt = System.currentTimeMillis();
+                    dragging = false;
+                    if (callback != null) callback.onFireDown();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (System.currentTimeMillis() - downAt > 500) {
+                        dragging = true;
+                        lp.x = (int) (e.getRawX() - radius);
+                        lp.y = (int) (e.getRawY() - radius);
+                        try { wm.updateViewLayout(this, lp); } catch (Exception ignored) { }
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (dragging && callback != null) {
+                        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+                        callback.onMoved(lp.x / (float) dm.widthPixels, lp.y / (float) dm.heightPixels);
+                    }
+                    dragging = false;
                     return true;
             }
             return super.onTouchEvent(e);

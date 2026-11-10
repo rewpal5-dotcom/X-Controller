@@ -44,6 +44,11 @@ public class ProfileStore {
         public float joyX = 0.16f, joyY = 0.78f;   // centre (0..1)
         public float joyR = 0.11f;                 // radius (screen width ka hissa)
 
+        // on-screen FIRE button (mouse fire)
+        public float fireX = 0.86f, fireY = 0.80f;
+        public float fireR = 0.085f;
+        public boolean fireBtn = true;
+
         // keyboard capture (game ke saath conflict na ho, isliye default OFF)
         public boolean keyCapture = true;
 
@@ -98,6 +103,10 @@ public class ProfileStore {
                 p.joyR = (float) o.optDouble("joyR", 0.11);
                 p.aimEnabled = o.optBoolean("aim", false);
                 p.keyCapture = o.optBoolean("keys", true);
+                p.fireX = (float) o.optDouble("fireX", 0.86);
+                p.fireY = (float) o.optDouble("fireY", 0.80);
+                p.fireR = (float) o.optDouble("fireR", 0.085);
+                p.fireBtn = o.optBoolean("fireBtn", true);
                 p.aimZone = o.optString("aimZone", "right");
                 JSONArray bs = o.optJSONArray("bindings");
                 if (bs != null) {
@@ -137,6 +146,10 @@ public class ProfileStore {
                 o.put("joyR", p.joyR);
                 o.put("aim", p.aimEnabled);
                 o.put("keys", p.keyCapture);
+                o.put("fireX", p.fireX);
+                o.put("fireY", p.fireY);
+                o.put("fireR", p.fireR);
+                o.put("fireBtn", p.fireBtn);
                 o.put("aimZone", p.aimZone);
                 JSONArray bs = new JSONArray();
                 for (Binding b : p.bindings) {
@@ -209,16 +222,12 @@ public class ProfileStore {
     public void ensureDefault() {
         if (!all().isEmpty()) return;
         Profile p = new Profile("Shooter (default)");
-        p.bindings.add(new Binding("W", 0.18f, 0.70f, "Move Forward"));
-        p.bindings.add(new Binding("A", 0.10f, 0.80f, "Move Left"));
-        p.bindings.add(new Binding("S", 0.18f, 0.90f, "Move Back"));
-        p.bindings.add(new Binding("D", 0.26f, 0.80f, "Move Right"));
-        p.bindings.add(new Binding("SPACE", 0.86f, 0.88f, "Jump"));
-        p.bindings.add(new Binding("R", 0.80f, 0.70f, "Reload"));
-        p.bindings.add(new Binding("F", 0.72f, 0.80f, "Interact"));
-        p.bindings.add(new Binding("SHIFT", 0.34f, 0.70f, "Sprint"));
+        // sirf 2 zaroori buttons — baaki user khud "+" se banayega
+        p.bindings.add(new Binding("SPACE", 0.72f, 0.88f, "Jump"));
         p.bindings.add(new Binding("MOUSE_LEFT", 0.90f, 0.55f, "Fire"));
-        p.bindings.add(new Binding("MOUSE_RIGHT", 0.80f, 0.50f, "Aim"));
+        p.joystick = true;
+        p.aimEnabled = true;
+        p.fireBtn = true;
         upsert(p);
         setActive(p.name);
         setDefaultProfile(p.name);
