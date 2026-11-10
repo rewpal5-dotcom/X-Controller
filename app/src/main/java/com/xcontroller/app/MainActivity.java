@@ -65,6 +65,15 @@ public class MainActivity extends Activity {
         box.addView(tile("ℹ  About App", "Privacy, terms, compatibility",
                 null, v -> startActivity(new Intent(this, AboutActivity.class).putExtra("tab", "about"))));
 
+        LinearLayout tip = UiKit.card(this);
+        tip.addView(UiKit.title(this, "Floating button", 15));
+        tip.addView(UiKit.muted(this,
+                "Game ke upar chhota 'X' button dikhega.\n"
+              + "Tap karein → EDIT mode: saare controls dikhte hain, jahan chahein drag karein.\n"
+              + "Khaali jagah par tap → naya button. Button par tap → select → size / key / delete.\n"
+              + "✓ Done dabayein → PLAY mode."));
+        box.addView(tip);
+
         ProfileStore.Profile p = store.active();
         TextView act = UiKit.muted(this, "Active profile: " + (p == null ? "—" : p.name)
                 + "  ·  " + (p == null ? 0 : p.bindings.size()) + " controls");

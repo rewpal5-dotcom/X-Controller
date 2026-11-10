@@ -23,7 +23,9 @@ public class AboutActivity extends Activity {
               + "3. My Games → game chunein → Custom Controls mein keys set karein\n"
               + "4. Controller Profiles mein buttons ki jagah/size set karein\n"
               + "5. Start Controller dabayein, phir game kholein\n"
-              + "6. Screen par floating panel: ✥ se hilayein, KEY se mapping on/off, ✕ se band"));
+              + "6. Screen par chhota 'X' floating button — jahan chahein drag karein\n"
+              + "7. Button par tap → EDIT mode: controls drag karke set karein, khaali jagah par\n"
+              + "   tap se naya button, select karke size/key/delete, phir ✓ Done"));
 
         box.addView(section("Compatibility (imaandar report)",
                 "• Native keyboard/mouse support wale games: poora support (game khud handle karta hai)\n"

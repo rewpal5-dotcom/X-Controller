@@ -26,8 +26,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * OverlayService — game ke upar floating controller.
- * Panel: ✥ drag · KEY on/off · ✎ edit · ⏸ pause · ✕ close
+ * OverlayService — floating controller (v3).
+ *
+ *  • Chhota floating button (bubble) — screen par kahin bhi rakh sakte hain
+ *  • Bubble dabao → EDIT mode: saare control buttons dikhte hain, jahan chahein
+ *    drag karke rakhein, size badlein, key badlein, delete karein, naya add karein
+ *  • Done dabao → PLAY mode: buttons wahi rehte hain, keyboard se mapping chalti hai
  */
 public class OverlayService extends Service {
 
@@ -35,11 +39,14 @@ public class OverlayService extends Service {
     private static OverlayService instance;
 
     private WindowManager wm;
-    private PanelView view;
-    private WindowManager.LayoutParams params;
+    private PanelView panel;
+    private BubbleView bubble;
+    private WindowManager.LayoutParams panelParams, bubbleParams;
+
+    private ProfileStore store;
     private ProfileStore.Profile profile;
+    private boolean editMode = false;
     private boolean keyMode = true;
-    private boolean paused = false;
 
     public static OverlayService get() { return instance; }
 
@@ -48,6 +55,7 @@ public class OverlayService extends Service {
         super.onCreate();
         instance = this;
         running = true;
+        store = new ProfileStore(this);
         startForegroundNotice();
         showOverlay();
     }
@@ -65,14 +73,13 @@ public class OverlayService extends Service {
         int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 : PendingIntent.FLAG_UPDATE_CURRENT;
-        PendingIntent pi = PendingIntent.getActivity(this, 0,
-                new Intent(this, MainActivity.class), flags);
+        PendingIntent pi = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), flags);
 
         Notification.Builder b = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, channelId)
                 : new Notification.Builder(this);
         b.setContentTitle("X Controller chal raha hai")
-                .setContentText("Floating panel screen par hai")
+                .setContentText("Floating button se controls set karein")
                 .setSmallIcon(android.R.drawable.ic_menu_compass)
                 .setContentIntent(pi)
                 .setOngoing(true);
@@ -85,47 +92,79 @@ public class OverlayService extends Service {
         }
     }
 
+    /* ================= setup ================= */
+
     private void showOverlay() {
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-        ProfileStore store = new ProfileStore(this);
         profile = store.active();
+        if (profile == null) { stopSelf(); return; }
 
         DisplayMetrics dm = getResources().getDisplayMetrics();
         int w = dm.widthPixels, h = dm.heightPixels;
 
-        view = new PanelView(this, profile, w, h);
-        view.listener = new PanelView.Listener() {
+        /* ---- full screen controls layer ---- */
+        panel = new PanelView(this, profile, w, h);
+        panel.callback = new PanelView.Callback() {
             public void onKey(String key) { handleKey(key); }
+            public void onEditToggle() { setEditMode(!editMode); }
             public void onClose() { stopSelf(); }
-            public void onToggle() { keyMode = !keyMode; view.keyMode = keyMode; view.invalidate(); }
-            public void onPause() { paused = !paused; view.paused = paused; view.invalidate(); }
-            public void onEdit() {
-                Intent i = new Intent(OverlayService.this, LayoutActivity.class);
-                i.putExtra("profile", profile == null ? "" : profile.name);
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
-            }
+            public void onKeyToggle() { keyMode = !keyMode; panel.keyMode = keyMode; panel.invalidate(); }
+            public void onChanged() { store.upsert(profile); }
         };
 
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
 
-        params = new WindowManager.LayoutParams(
+        panelParams = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                PixelFormat.TRANSLUCENT);
+        panelParams.gravity = Gravity.TOP | Gravity.START;
+
+        try { wm.addView(panel, panelParams); } catch (Exception ignored) { }
+
+        /* ---- floating bubble ---- */
+        bubble = new BubbleView(this);
+        bubble.callback = new BubbleView.Callback() {
+            public void onTap() { setEditMode(!editMode); }
+            public void onLongPress() { setEditMode(true); }
+        };
+        bubbleParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
-        params.gravity = Gravity.TOP | Gravity.START;
+        bubbleParams.gravity = Gravity.TOP | Gravity.START;
+        bubbleParams.x = 16;
+        bubbleParams.y = Math.max(120, h / 3);
 
-        try { wm.addView(view, params); } catch (Exception ignored) { }
+        try { wm.addView(bubble, bubbleParams); } catch (Exception ignored) { }
+    }
+
+    private void setEditMode(boolean on) {
+        editMode = on;
+        panel.editMode = on;
+        panel.invalidate();
+        if (panelParams != null && wm != null) {
+            if (on) panelParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            else panelParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            try { wm.updateViewLayout(panel, panelParams); } catch (Exception ignored) { }
+        }
+        if (!on) {
+            store.upsert(profile);
+        }
     }
 
     private void handleKey(String keyName) {
-        if (!keyMode || paused || profile == null) return;
+        if (editMode || !keyMode || profile == null) return;
         ProfileStore.Binding b = profile.find(keyName);
         if (b == null) return;
         KeyAccessibilityService svc = KeyAccessibilityService.get();
@@ -144,165 +183,392 @@ public class OverlayService extends Service {
     public void onDestroy() {
         running = false;
         instance = null;
-        if (view != null && wm != null) {
-            try { wm.removeView(view); } catch (Exception ignored) { }
-        }
+        try { if (panel != null) wm.removeView(panel); } catch (Exception ignored) { }
+        try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
         super.onDestroy();
     }
 
     @Override
     public IBinder onBind(Intent intent) { return null; }
 
-    /* ==================== floating panel ==================== */
-    static class PanelView extends FrameLayout {
+    /* ===================== floating bubble ===================== */
+    static class BubbleView extends View {
+        interface Callback { void onTap(); void onLongPress(); }
+        Callback callback;
+        private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final int size;
+        private float downX, downY;
+        private long downAt;
+        private boolean moved;
 
-        interface Listener {
-            void onKey(String key);
-            void onClose();
-            void onToggle();
-            void onPause();
-            void onEdit();
+        BubbleView(Context c) {
+            super(c);
+            size = (int) (58 * c.getResources().getDisplayMetrics().density);
+            bg.setColor(0xE60B0F17);
+            ring.setColor(0xFF22D3EE);
+            ring.setStyle(Paint.Style.STROKE);
+            ring.setStrokeWidth(5f);
+            txt.setColor(0xFF22D3EE);
+            txt.setTextAlign(Paint.Align.CENTER);
+            txt.setTextSize(size * 0.42f);
+            txt.setFakeBoldText(true);
         }
 
-        Listener listener;
-        boolean keyMode = true;
-        boolean paused = false;
+        @Override
+        protected void onMeasure(int w, int h) { setMeasuredDimension(size, size); }
 
-        private final List<ProfileStore.Binding> bindings = new ArrayList<>();
+        @Override
+        protected void onDraw(Canvas c) {
+            float r = size / 2f;
+            c.drawCircle(r, r, r - 4, bg);
+            c.drawCircle(r, r, r - 4, ring);
+            c.drawText("X", r, r + size * 0.15f, txt);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) getLayoutParams();
+            WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getRawX(); downY = e.getRawY();
+                    downAt = System.currentTimeMillis();
+                    moved = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (Math.abs(e.getRawX() - downX) > 12 || Math.abs(e.getRawY() - downY) > 12) {
+                        moved = true;
+                        lp.x = (int) (e.getRawX() - size / 2f);
+                        lp.y = (int) (e.getRawY() - size / 2f);
+                        try { wm.updateViewLayout(this, lp); } catch (Exception ignored) { }
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    if (!moved) {
+                        long dur = System.currentTimeMillis() - downAt;
+                        if (dur > 550) { if (callback != null) callback.onLongPress(); }
+                        else { if (callback != null) callback.onTap(); }
+                    }
+                    return true;
+            }
+            return super.onTouchEvent(e);
+        }
+    }
+
+    /* ===================== controls layer ===================== */
+    static class PanelView extends FrameLayout {
+        interface Callback {
+            void onKey(String key);
+            void onEditToggle();
+            void onClose();
+            void onKeyToggle();
+            void onChanged();
+        }
+
+        Callback callback;
+        boolean editMode = false;
+        boolean keyMode = true;
+
+        private final ProfileStore.Profile profile;
+        private final List<ProfileStore.Binding> bindings;
+        private final int screenW, screenH;
+
         private final Paint dot = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint panel = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint chip = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint bar = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint accent = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
-        private final int screenW, screenH;
-        private final float opacity, btnScale;
-        private float barX = 24, barY = 130;
-        private boolean draggingBar = false;
+
+        private int selected = -1;
+        private int dragIndex = -1;
         private float dragDX, dragDY;
+        private long downAt;
+        private float downX, downY;
+        private boolean chooserOpen = false;
+        private String pendingKeyTarget = null;
+
+        private static final String[] KEY_CHOICES = {
+                "W", "A", "S", "D", "SPACE", "SHIFT", "CTRL", "ALT",
+                "R", "F", "E", "Q", "TAB", "ESC", "1", "2",
+                "MOUSE_LEFT", "MOUSE_RIGHT", "SCROLL_UP", "SCROLL_DOWN"
+        };
 
         PanelView(Context c, ProfileStore.Profile p, int w, int h) {
             super(c);
+            profile = p;
+            bindings = p.bindings;
             screenW = w; screenH = h;
-            if (p != null) {
-                bindings.addAll(p.bindings);
-                opacity = p.buttonOpacity;
-                btnScale = p.buttonSize;
-            } else {
-                opacity = 0.85f; btnScale = 1f;
-            }
             setWillNotDraw(false);
             setFocusable(true);
             setFocusableInTouchMode(true);
 
-            int alpha = (int) (255 * opacity);
-            dot.setColor(Color.argb((int) (alpha * 0.35), 34, 211, 238));
-            ring.setColor(Color.argb(alpha, 34, 211, 238));
+            dot.setColor(0x5522D3EE);
+            ring.setColor(0xCC22D3EE);
             ring.setStyle(Paint.Style.STROKE);
             ring.setStrokeWidth(4f);
-            label.setColor(Color.argb(alpha, 255, 255, 255));
+            label.setColor(0xFFFFFFFF);
             label.setTextAlign(Paint.Align.CENTER);
-            label.setTextSize(30f);
-            panel.setColor(Color.argb(220, 7, 11, 18));
-            chip.setColor(Color.argb(255, 34, 211, 238));
+            bar.setColor(0xF00B0F17);
+            accent.setColor(0xFF22D3EE);
+        }
+
+        private float radius(ProfileStore.Binding b) {
+            return 46f * profile.buttonSize * (b.size <= 0 ? 1f : b.size);
         }
 
         @Override
         protected void onDraw(Canvas c) {
             super.onDraw(c);
 
-            float base = 46f * btnScale;
-            for (ProfileStore.Binding b : bindings) {
-                float x = b.x * getWidth(), y = b.y * getHeight(), rad = base * b.size;
-                c.drawCircle(x, y, rad, dot);
-                c.drawCircle(x, y, rad, ring);
+            /* ---- mapped controls ---- */
+            for (int i = 0; i < bindings.size(); i++) {
+                ProfileStore.Binding b = bindings.get(i);
+                float x = b.x * getWidth(), y = b.y * getHeight(), r = radius(b);
+                int alpha = (int) (255 * profile.buttonOpacity);
+                Paint p = new Paint(dot);
+                p.setColor(Color.argb((int) (alpha * 0.33), 34, 211, 238));
+                c.drawCircle(x, y, r, p);
+                Paint rp = new Paint(ring);
+                rp.setColor(Color.argb(alpha, i == selected && editMode ? 168 : 34,
+                        i == selected && editMode ? 85 : 211,
+                        i == selected && editMode ? 247 : 238));
+                rp.setStrokeWidth(i == selected && editMode ? 7f : 4f);
+                c.drawCircle(x, y, r, rp);
+
                 Paint tp = new Paint(label);
-                tp.setTextSize(rad * 0.6f);
-                c.drawText(b.key, x, y + rad * 0.2f, tp);
+                tp.setColor(Color.argb(alpha, 255, 255, 255));
+                tp.setTextSize(r * 0.55f);
+                c.drawText(b.key, x, y + r * 0.18f, tp);
             }
 
-            // top bar
-            rect.set(barX, barY, barX + 430, barY + 92);
-            c.drawRoundRect(rect, 26, 26, panel);
+            if (!editMode) return;
 
-            Paint p = new Paint(label);
-            p.setTextSize(32f);
-            p.setColor(UiKit.ACCENT);
-            c.drawText("✥", barX + 42, barY + 60, p);
+            /* ---- edit toolbar ---- */
+            float barH = 96, top = 26;
+            rect.set(20, top, getWidth() - 20, top + barH);
+            c.drawRoundRect(rect, 26, 26, bar);
 
-            p.setColor(keyMode ? UiKit.GREEN : UiKit.RED);
-            p.setTextSize(24f);
-            c.drawText(keyMode ? "KEY ON" : "KEY OFF", barX + 108, barY + 57, p);
+            Paint tp = new Paint(label);
+            tp.setTextSize(30f);
+            tp.setColor(Color.WHITE);
+            tp.setTextAlign(Paint.Align.LEFT);
+            c.drawText("EDIT MODE — drag / tap to select", 44, top + 58, tp);
 
-            p.setColor(paused ? UiKit.AMBER : UiKit.TEXT);
-            c.drawText(paused ? "⏸ PAUSED" : "⏸", barX + 250, barY + 57, p);
+            float bx = getWidth() - 20;
+            Paint btn = new Paint(label);
+            btn.setTextAlign(Paint.Align.CENTER);
+            btn.setTextSize(34f);
 
-            p.setColor(UiKit.TEXT);
-            c.drawText("✎", barX + 336, barY + 57, p);
+            // Done
+            btn.setColor(0xFF22C55E);
+            c.drawText("✓", bx - 48, top + 60, btn);
+            // close
+            btn.setColor(0xFFEF4444);
+            c.drawText("✕", bx - 118, top + 60, btn);
 
-            p.setColor(UiKit.RED);
-            c.drawText("✕", barX + 398, barY + 57, p);
+            /* ---- selected actions ---- */
+            if (selected >= 0 && selected < bindings.size()) {
+                float ay = top + barH + 26;
+                rect.set(20, ay, getWidth() - 20, ay + 96);
+                Paint bar2 = new Paint(bar);
+                bar2.setColor(0xF0101822);
+                c.drawRoundRect(rect, 26, 26, bar2);
+                Paint ap = new Paint(label);
+                ap.setTextSize(30f);
+                ap.setTextAlign(Paint.Align.LEFT);
+                ap.setColor(0xFF9FB3C8);
+                c.drawText(bindings.get(selected).key + " → " +
+                        (bindings.get(selected).action == null || bindings.get(selected).action.isEmpty()
+                                ? "—" : bindings.get(selected).action), 44, ay + 58, ap);
+
+                Paint b2 = new Paint(btn);
+                b2.setColor(0xFF22D3EE);
+                c.drawText("−", getWidth() - 300, ay + 60, b2);
+                c.drawText("+", getWidth() - 240, ay + 60, b2);
+                b2.setColor(0xFFF59E0B);
+                c.drawText("K", getWidth() - 176, ay + 60, b2);
+                b2.setColor(0xFFEF4444);
+                c.drawText("🗑", getWidth() - 96, ay + 60, b2);
+            }
+
+            /* ---- key chooser ---- */
+            if (chooserOpen) {
+                float gw = getWidth() - 80;
+                float cell = gw / 4f;
+                float startY = getHeight() / 2f - cell * 2.5f;
+                rect.set(40, startY - 40, getWidth() - 40, startY + cell * 5 + 40);
+                Paint bgp = new Paint(bar);
+                bgp.setColor(0xF0070B12);
+                c.drawRoundRect(rect, 26, 26, bgp);
+                Paint kp = new Paint(label);
+                kp.setTextSize(cell * 0.24f);
+                kp.setColor(Color.WHITE);
+                for (int i = 0; i < KEY_CHOICES.length; i++) {
+                    int row = i / 4, col = i % 4;
+                    float cx = 40 + col * cell + cell / 2f;
+                    float cy = startY + row * cell + cell / 2f;
+                    c.drawText(KEY_CHOICES[i], cx, cy, kp);
+                }
+            }
         }
 
         @Override
         public boolean onTouchEvent(MotionEvent e) {
             float x = e.getX(), y = e.getY();
+            float barH = 96, top = 26;
+
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
-                    if (x >= barX && x <= barX + 430 && y >= barY && y <= barY + 92) {
-                        if (x > barX + 370) { if (listener != null) listener.onClose(); }
-                        else if (x > barX + 300) { if (listener != null) listener.onEdit(); }
-                        else if (x > barX + 210) { if (listener != null) listener.onPause(); }
-                        else if (x > barX + 80) { if (listener != null) listener.onToggle(); }
-                        else {
-                            draggingBar = true;
-                            dragDX = x - barX; dragDY = y - barY;
+                    downAt = System.currentTimeMillis();
+                    downX = x; downY = y;
+
+                    if (chooserOpen) {
+                        float gw = getWidth() - 80, cell = gw / 4f;
+                        float startY = getHeight() / 2f - cell * 2.5f;
+                        int col = (int) ((x - 40) / cell);
+                        int row = (int) ((y - startY) / cell);
+                        int idx = row * 4 + col;
+                        if (col >= 0 && col < 4 && row >= 0 && row < 5 && idx < KEY_CHOICES.length) {
+                            if (pendingKeyTarget != null) {
+                                ProfileStore.Binding b = find(pendingKeyTarget);
+                                if (b != null) b.key = KEY_CHOICES[idx];
+                            }
+                            chooserOpen = false;
+                            pendingKeyTarget = null;
+                            if (callback != null) callback.onChanged();
+                            invalidate();
+                            return true;
                         }
-                        return true;
-                    }
-                    return false;
-                case MotionEvent.ACTION_MOVE:
-                    if (draggingBar) {
-                        barX = Math.max(0, Math.min(screenW - 430, x - dragDX));
-                        barY = Math.max(0, Math.min(screenH - 92, y - dragDY));
+                        chooserOpen = false;
                         invalidate();
                         return true;
                     }
-                    return false;
+
+                    /* toolbar: done / close */
+                    if (y < top + barH) {
+                        if (x > getWidth() - 80) {                 // ✓ Done
+                            if (callback != null) callback.onEditToggle();
+                            return true;
+                        }
+                        if (x > getWidth() - 150 && x < getWidth() - 86) {   // ✕
+                            if (callback != null) callback.onClose();
+                            return true;
+                        }
+                    }
+
+                    /* selected actions row */
+                    if (selected >= 0 && selected < bindings.size()) {
+                        float ay = top + barH + 26;
+                        if (y > ay && y < ay + 96) {
+                            ProfileStore.Binding b = bindings.get(selected);
+                            if (x > getWidth() - 320 && x < getWidth() - 270) {
+                                b.size = Math.max(0.5f, b.size - 0.15f);
+                                if (callback != null) callback.onChanged();
+                                invalidate();
+                                return true;
+                            }
+                            if (x > getWidth() - 260 && x < getWidth() - 210) {
+                                b.size = Math.min(2.0f, b.size + 0.15f);
+                                if (callback != null) callback.onChanged();
+                                invalidate();
+                                return true;
+                            }
+                            if (x > getWidth() - 196 && x < getWidth() - 140) {
+                                chooserOpen = true;
+                                pendingKeyTarget = b.key;
+                                invalidate();
+                                return true;
+                            }
+                            if (x > getWidth() - 116) {
+                                bindings.remove(selected);
+                                selected = -1;
+                                if (callback != null) callback.onChanged();
+                                invalidate();
+                                return true;
+                            }
+                        }
+                    }
+
+                    /* pick a control */
+                    for (int i = bindings.size() - 1; i >= 0; i--) {
+                        ProfileStore.Binding b = bindings.get(i);
+                        float dx = b.x * getWidth() - x, dy = b.y * getHeight() - y;
+                        if (Math.sqrt(dx * dx + dy * dy) < radius(b) + 14) {
+                            selected = i;
+                            dragIndex = i;
+                            dragDX = x - b.x * getWidth();
+                            dragDY = y - b.y * getHeight();
+                            invalidate();
+                            return true;
+                        }
+                    }
+
+                    /* empty area: naya button yahan lagao */
+                    if (y > top + barH + 130) {
+                        ProfileStore.Binding nb = new ProfileStore.Binding("NEW",
+                                x / getWidth(), y / getHeight(), "");
+                        bindings.add(nb);
+                        selected = bindings.size() - 1;
+                        chooserOpen = true;
+                        pendingKeyTarget = nb.key;
+                        if (callback != null) callback.onChanged();
+                        invalidate();
+                        return true;
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    if (dragIndex >= 0 && dragIndex < bindings.size()) {
+                        ProfileStore.Binding b = bindings.get(dragIndex);
+                        b.x = Math.max(0.02f, Math.min(0.98f, (x - dragDX) / getWidth()));
+                        b.y = Math.max(0.02f, Math.min(0.98f, (y - dragDY) / getHeight()));
+                        invalidate();
+                    }
+                    return true;
+
                 case MotionEvent.ACTION_UP:
-                    draggingBar = false;
+                    if (dragIndex >= 0) {
+                        if (callback != null) callback.onChanged();
+                        dragIndex = -1;
+                    }
                     return true;
             }
             return super.onTouchEvent(e);
         }
 
+        private ProfileStore.Binding find(String key) {
+            for (ProfileStore.Binding b : bindings) if (b.key.equals(key)) return b;
+            return null;
+        }
+
         @Override
-        public boolean onKeyDown(int keyCode, KeyEvent event) {
-            String name = keyName(keyCode);
-            if (name != null && listener != null) {
-                listener.onKey(name);
+        public boolean onKeyDown(int code, KeyEvent event) {
+            if (editMode) return super.onKeyDown(code, event);
+            String name = keyName(code);
+            if (name != null && callback != null) {
+                callback.onKey(name);
                 return true;
             }
-            return super.onKeyDown(keyCode, event);
+            return super.onKeyDown(code, event);
         }
 
         @Override
         public boolean onGenericMotionEvent(MotionEvent e) {
-            int action = e.getActionMasked();
-            if (action == MotionEvent.ACTION_BUTTON_PRESS) {
-                int btn = e.getButtonState();
+            if (editMode) return super.onGenericMotionEvent(e);
+            if (e.getActionMasked() == MotionEvent.ACTION_BUTTON_PRESS) {
+                int b = e.getButtonState();
                 String name = null;
-                if ((btn & MotionEvent.BUTTON_PRIMARY) != 0) name = "MOUSE_LEFT";
-                else if ((btn & MotionEvent.BUTTON_SECONDARY) != 0) name = "MOUSE_RIGHT";
-                else if ((btn & MotionEvent.BUTTON_TERTIARY) != 0) name = "MOUSE_MIDDLE";
-                if (name != null && listener != null) {
-                    listener.onKey(name);
-                    return true;
-                }
+                if ((b & MotionEvent.BUTTON_PRIMARY) != 0) name = "MOUSE_LEFT";
+                else if ((b & MotionEvent.BUTTON_SECONDARY) != 0) name = "MOUSE_RIGHT";
+                else if ((b & MotionEvent.BUTTON_TERTIARY) != 0) name = "MOUSE_MIDDLE";
+                if (name != null && callback != null) { callback.onKey(name); return true; }
             }
-            if (action == MotionEvent.ACTION_SCROLL) {
+            if (e.getActionMasked() == MotionEvent.ACTION_SCROLL) {
                 float v = e.getAxisValue(MotionEvent.AXIS_VSCROLL);
-                if (listener != null) listener.onKey(v > 0 ? "SCROLL_UP" : "SCROLL_DOWN");
+                if (callback != null) callback.onKey(v > 0 ? "SCROLL_UP" : "SCROLL_DOWN");
                 return true;
             }
             return super.onGenericMotionEvent(e);
