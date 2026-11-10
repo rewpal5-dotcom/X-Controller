@@ -742,9 +742,9 @@ public class OverlayService extends Service {
                 c.drawText(b.key, x, y + r * 0.18f, tp);
             }
 
-            return;
+            if (!editMode) return;
 
-            /* ---- edit toolbar (ab use nahi hota) ---- */
+            /* ---- edit toolbar (ab use nahi hota — editMode hamesha false) ---- */
             float barH = 96, top = 26;
             rect.set(20, top, getWidth() - 20, top + barH);
             c.drawRoundRect(rect, 26, 26, bar);
