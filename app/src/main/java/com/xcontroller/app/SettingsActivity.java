@@ -168,5 +168,12 @@ public class SettingsActivity extends Activity {
         return wrap;
     }
 
-    private void save() { store.upsert(profile); }
+    private void save() {
+        store.upsert(profile);
+        if (OverlayService.running) {
+            android.content.Intent i = new android.content.Intent(this, OverlayService.class);
+            i.setAction(OverlayService.ACTION_RELOAD);
+            try { startService(i); } catch (Exception ignored) { }
+        }
+    }
 }

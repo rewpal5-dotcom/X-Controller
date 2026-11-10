@@ -118,11 +118,11 @@ public class OverlayService extends Service {
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
 
-        // Panel sirf controls ke aas-paas ka chhota area leta hai (poori screen nahi) —
-        // isse game freeze/pause nahi hota.
-        int[] box = panel.contentBox();
+        // Panel poore screen par hai, lekin NOT_TOUCHABLE + NOT_FOCUSABLE —
+        // isliye game ko bilkul chhoota nahi (koi freeze nahi), aur drawing sahi jagah hoti hai.
         panelParams = new WindowManager.LayoutParams(
-                box[2], box[3],
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -130,8 +130,7 @@ public class OverlayService extends Service {
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         panelParams.gravity = Gravity.TOP | Gravity.START;
-        panelParams.x = box[0];
-        panelParams.y = box[1];
+        panelParams.x = 0; panelParams.y = 0;
 
         try { wm.addView(panel, panelParams); } catch (Exception ignored) { }
 
@@ -289,16 +288,9 @@ public class OverlayService extends Service {
             if (on) {
                 panelParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
                 panelParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-                panelParams.width = WindowManager.LayoutParams.MATCH_PARENT;
-                panelParams.height = WindowManager.LayoutParams.MATCH_PARENT;
-                panelParams.x = 0; panelParams.y = 0;
             } else {
-                int[] box = panel.contentBox();
                 panelParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
                 panelParams.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
-                panelParams.width = box[2];
-                panelParams.height = box[3];
-                panelParams.x = box[0]; panelParams.y = box[1];
             }
             try { wm.updateViewLayout(panel, panelParams); } catch (Exception ignored) { }
         }
@@ -317,10 +309,29 @@ public class OverlayService extends Service {
         svc.tap(b.x * dm.widthPixels, b.y * dm.heightPixels);
     }
 
+    public static final String ACTION_RELOAD = "com.xcontroller.app.RELOAD";
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && intent.getBooleanExtra("stop", false)) stopSelf();
+        if (intent != null) {
+            if (intent.getBooleanExtra("stop", false)) { stopSelf(); return START_NOT_STICKY; }
+            if (ACTION_RELOAD.equals(intent.getAction())) reload();
+        }
         return START_STICKY;
+    }
+
+    /** Settings badalne par overlay ko naye profile ke saath dobara banao. */
+    public void reload() {
+        try { if (panel != null) wm.removeView(panel); } catch (Exception ignored) { }
+        try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
+        try { if (joystick != null) wm.removeView(joystick); } catch (Exception ignored) { }
+        try { if (aimPad != null) wm.removeView(aimPad); } catch (Exception ignored) { }
+        try { if (keySink != null) wm.removeView(keySink); } catch (Exception ignored) { }
+        panel = null; bubble = null; joystick = null; aimPad = null; keySink = null;
+        editMode = false;
+        profile = store.active();
+        if (profile == null) { stopSelf(); return; }
+        showOverlay();
     }
 
     @Override

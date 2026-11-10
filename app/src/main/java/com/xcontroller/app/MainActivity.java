@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
             kb.setChecked(activeProf.keyCapture);
             kb.setOnCheckedChangeListener((v, on) -> {
                 ProfileStore.Profile p2 = store.active();
-                if (p2 != null) { p2.keyCapture = on; store.upsert(p2); }
+                if (p2 != null) { p2.keyCapture = on; store.upsert(p2); reloadOverlay(); }
             });
             quick.addView(kb, UiKit.matchWrap(10));
 
@@ -88,7 +88,7 @@ public class MainActivity extends Activity {
             ms.setChecked(activeProf.aimEnabled);
             ms.setOnCheckedChangeListener((v, on) -> {
                 ProfileStore.Profile p2 = store.active();
-                if (p2 != null) { p2.aimEnabled = on; store.upsert(p2); }
+                if (p2 != null) { p2.aimEnabled = on; store.upsert(p2); reloadOverlay(); }
             });
             quick.addView(ms, UiKit.matchWrap(6));
             quick.addView(UiKit.muted(this,
@@ -162,6 +162,13 @@ public class MainActivity extends Activity {
 
     private boolean canOverlay() {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
+    }
+
+    private void reloadOverlay() {
+        if (!OverlayService.running) return;
+        Intent i = new Intent(this, OverlayService.class);
+        i.setAction(OverlayService.ACTION_RELOAD);
+        try { startService(i); } catch (Exception ignored) { }
     }
 
     private void startController() {
