@@ -163,6 +163,7 @@ public class OverlayService extends Service {
             joystick.callback = new JoystickView.Callback() {
                 public void onMove(float dx, float dy) { moveBy(dx, dy); }
                 public void onRelease() { stopMoving(); }
+                public void onStart() { joyActive = false; }
                 public void onPosition(float nx, float ny) {
                     profile.joyX = nx; profile.joyY = ny; store.upsert(profile);
                 }
@@ -201,6 +202,8 @@ public class OverlayService extends Service {
     }
 
     /* ---- joystick movement: game ke joystick par stroke bhejo ---- */
+    private boolean joyActive = false;
+
     private void moveBy(float dx, float dy) {
         if (profile == null) return;
         KeyAccessibilityService svc = KeyAccessibilityService.get();
@@ -211,14 +214,21 @@ public class OverlayService extends Service {
         float r = profile.joyR * dm.widthPixels;
         float tx = cx + dx * r;
         float ty = cy + dy * r;
-        svc.stroke(cx, cy, tx, ty, 220);
+        if (!joyActive) {
+            joyActive = true;
+            svc.joyStart(cx, cy);
+        } else {
+            svc.joyMove(tx, ty);
+        }
     }
 
     private void stopMoving() {
         KeyAccessibilityService svc = KeyAccessibilityService.get();
-        if (svc == null || profile == null) return;
-        DisplayMetrics dm = getResources().getDisplayMetrics();
-        svc.tap(profile.joyX * dm.widthPixels, profile.joyY * dm.heightPixels);
+        if (svc == null) { joyActive = false; return; }
+        if (joyActive) {
+            svc.joyEnd();
+            joyActive = false;
+        }
     }
 
     /* ---- mouse aim: mouse ka movement swipe gesture mein badlo ---- */
@@ -811,6 +821,7 @@ public class OverlayService extends Service {
             void onMove(float dx, float dy);
             void onRelease();
             void onPosition(float nx, float ny);
+            void onStart();
         }
         Callback callback;
         private final ProfileStore.Profile profile;
@@ -864,6 +875,7 @@ public class OverlayService extends Service {
                 case MotionEvent.ACTION_DOWN:
                     downRawX = e.getRawX(); downRawY = e.getRawY();
                     dragging = true; movingKnob = false;
+                    if (callback != null) callback.onStart();
                     return true;
                 case MotionEvent.ACTION_MOVE: {
                     float dx = e.getX() - r, dy = e.getY() - r;

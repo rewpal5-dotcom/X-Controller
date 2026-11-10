@@ -60,6 +60,7 @@ public class MainActivity extends Activity {
                         .putExtra("mode", "keyboard"))));
         box.addView(tile("🎛  Custom Controls", "Key mapping editor", MappingActivity.class));
         box.addView(tile("📐  Controller Profiles", "Layout, size, position", LayoutActivity.class));
+        box.addView(tile("🧪  Compatibility Test", "Gesture kaam kar rahi hai ya block ho rahi hai", DiagActivity.class));
         box.addView(tile("⚙  Settings", "Sensitivity, theme, reset", SettingsActivity.class));
         box.addView(tile("❓  Help & Support", "Kaise chalayein", AboutActivity.class));
         box.addView(tile("ℹ  About App", "Privacy, terms, compatibility",
