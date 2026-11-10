@@ -70,12 +70,12 @@ public class MainActivity extends Activity {
         LinearLayout quick = UiKit.card(this);
         quick.addView(UiKit.title(this, "Input mode", 15));
 
-        ProfileStore.Profile act = store.active();
-        if (act != null) {
+        ProfileStore.Profile activeProf = store.active();
+        if (activeProf != null) {
             android.widget.Switch kb = new android.widget.Switch(this);
             kb.setText("Keyboard capture (keys → game)");
             kb.setTextColor(UiKit.TEXT);
-            kb.setChecked(act.keyCapture);
+            kb.setChecked(activeProf.keyCapture);
             kb.setOnCheckedChangeListener((v, on) -> {
                 ProfileStore.Profile p2 = store.active();
                 if (p2 != null) { p2.keyCapture = on; store.upsert(p2); }
@@ -85,7 +85,7 @@ public class MainActivity extends Activity {
             android.widget.Switch ms = new android.widget.Switch(this);
             ms.setText("Mouse mode (aim + clicks)");
             ms.setTextColor(UiKit.TEXT);
-            ms.setChecked(act.aimEnabled);
+            ms.setChecked(activeProf.aimEnabled);
             ms.setOnCheckedChangeListener((v, on) -> {
                 ProfileStore.Profile p2 = store.active();
                 if (p2 != null) { p2.aimEnabled = on; store.upsert(p2); }
