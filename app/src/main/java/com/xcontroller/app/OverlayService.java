@@ -67,6 +67,7 @@ public class OverlayService extends Service {
         instance = this;
         running = true;
         store = new ProfileStore(this);
+        KeyAccessibilityService.handler = name -> handleKey(name);
         startForegroundNotice();
         showOverlay();
     }
@@ -539,31 +540,11 @@ public class OverlayService extends Service {
     private void setKeyCapture(boolean on) {
         profile.keyCapture = on;
         store.upsert(profile);
-        if (on && keySink == null) {
-            keySink = new KeySinkView(this);
-            keySink.callback = new KeySinkView.Callback() {
-                public void onKey(String k) { handleKey(k); }
-            };
-            int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-                    ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    : WindowManager.LayoutParams.TYPE_PHONE;
-            keyParams = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    type,
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSLUCENT);
-            keyParams.gravity = Gravity.TOP | Gravity.START;
-            keyParams.x = 0; keyParams.y = 0;
-            try { wm.addView(keySink, keyParams); } catch (Exception ignored) { }
-        } else if (!on && keySink != null) {
-            try { wm.removeView(keySink); } catch (Exception ignored) { }
-            keySink = null;
-        }
+        // Ab koi focusable window nahi — keys AccessibilityService se aati hain.
         if (bubble != null) { bubble.keysOn = on; bubble.invalidate(); }
+        return;
     }
+
 
     private void setEditMode(boolean on) {
         editMode = on;
@@ -664,6 +645,7 @@ public class OverlayService extends Service {
     public void onDestroy() {
         running = false;
         instance = null;
+        KeyAccessibilityService.handler = null;
         clearControls();
         hideKeyMenu();
         try { if (panel != null) wm.removeView(panel); } catch (Exception ignored) { }
