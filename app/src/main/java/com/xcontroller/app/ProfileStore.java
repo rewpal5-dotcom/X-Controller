@@ -45,7 +45,7 @@ public class ProfileStore {
         public float joyR = 0.11f;                 // radius (screen width ka hissa)
 
         // keyboard capture (game ke saath conflict na ho, isliye default OFF)
-        public boolean keyCapture = false;
+        public boolean keyCapture = true;
 
         // mouse aim (mouse hilane par camera ghumana — swipe se)
         public boolean aimEnabled = false;
@@ -97,7 +97,7 @@ public class ProfileStore {
                 p.joyY = (float) o.optDouble("joyY", 0.78);
                 p.joyR = (float) o.optDouble("joyR", 0.11);
                 p.aimEnabled = o.optBoolean("aim", false);
-                p.keyCapture = o.optBoolean("keys", false);
+                p.keyCapture = o.optBoolean("keys", true);
                 p.aimZone = o.optString("aimZone", "right");
                 JSONArray bs = o.optJSONArray("bindings");
                 if (bs != null) {

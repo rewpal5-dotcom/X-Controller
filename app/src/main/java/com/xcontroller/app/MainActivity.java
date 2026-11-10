@@ -66,6 +66,36 @@ public class MainActivity extends Activity {
         box.addView(tile("ℹ  About App", "Privacy, terms, compatibility",
                 null, v -> startActivity(new Intent(this, AboutActivity.class).putExtra("tab", "about"))));
 
+        /* ---- quick toggles ---- */
+        LinearLayout quick = UiKit.card(this);
+        quick.addView(UiKit.title(this, "Input mode", 15));
+
+        ProfileStore.Profile act = store.active();
+        if (act != null) {
+            android.widget.Switch kb = new android.widget.Switch(this);
+            kb.setText("Keyboard capture (keys → game)");
+            kb.setTextColor(UiKit.TEXT);
+            kb.setChecked(act.keyCapture);
+            kb.setOnCheckedChangeListener((v, on) -> {
+                ProfileStore.Profile p2 = store.active();
+                if (p2 != null) { p2.keyCapture = on; store.upsert(p2); }
+            });
+            quick.addView(kb, UiKit.matchWrap(10));
+
+            android.widget.Switch ms = new android.widget.Switch(this);
+            ms.setText("Mouse mode (aim + clicks)");
+            ms.setTextColor(UiKit.TEXT);
+            ms.setChecked(act.aimEnabled);
+            ms.setOnCheckedChangeListener((v, on) -> {
+                ProfileStore.Profile p2 = store.active();
+                if (p2 != null) { p2.aimEnabled = on; store.upsert(p2); }
+            });
+            quick.addView(ms, UiKit.matchWrap(6));
+            quick.addView(UiKit.muted(this,
+                    "Badlav agle baar Start Controller karne par lagu honge."));
+        }
+        box.addView(quick);
+
         LinearLayout tip = UiKit.card(this);
         tip.addView(UiKit.title(this, "Floating button", 15));
         tip.addView(UiKit.muted(this,

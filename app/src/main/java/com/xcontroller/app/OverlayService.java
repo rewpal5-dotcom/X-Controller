@@ -262,9 +262,13 @@ public class OverlayService extends Service {
             int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                     : WindowManager.LayoutParams.TYPE_PHONE;
-            keyParams = new WindowManager.LayoutParams(2, 2, type,
+            keyParams = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    type,
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                     PixelFormat.TRANSLUCENT);
             keyParams.gravity = Gravity.TOP | Gravity.START;
             keyParams.x = 0; keyParams.y = 0;
@@ -932,10 +936,23 @@ public class OverlayService extends Service {
             hint.setTextAlign(Paint.Align.CENTER);
         }
 
+        private float curX = -1, curY = -1;
+        private final Paint cursor = new Paint(Paint.ANTI_ALIAS_FLAG);
+
         @Override
         protected void onDraw(Canvas c) {
             super.onDraw(c);
             c.drawText("AIM", getWidth() / 2f, 60, hint);
+            if (curX >= 0) {
+                cursor.setColor(0xFF22D3EE);
+                cursor.setStyle(Paint.Style.STROKE);
+                cursor.setStrokeWidth(3f);
+                c.drawCircle(curX, curY, 22, cursor);
+                c.drawLine(curX - 32, curY, curX - 10, curY, cursor);
+                c.drawLine(curX + 10, curY, curX + 32, curY, cursor);
+                c.drawLine(curX, curY - 32, curX, curY - 10, cursor);
+                c.drawLine(curX, curY + 10, curX, curY + 32, cursor);
+            }
         }
 
         @Override
@@ -952,6 +969,8 @@ public class OverlayService extends Service {
                     }
                 }
                 lastX = x; lastY = y;
+                curX = x; curY = y;
+                invalidate();
                 return true;
             }
             if (action == MotionEvent.ACTION_BUTTON_PRESS) {
