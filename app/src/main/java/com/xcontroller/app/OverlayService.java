@@ -57,7 +57,7 @@ public class OverlayService extends Service {
     private ProfileStore store;
     private ProfileStore.Profile profile;
     private boolean editMode = false;
-    private boolean keyMode = true;
+    private boolean keysOn = true;       // runtime: keyboard mapping chalu hai ya nahi
 
     public static OverlayService get() { return instance; }
 
@@ -452,8 +452,8 @@ public class OverlayService extends Service {
             if (tag.equals("master")) { toggleMaster(); }
             if (!tag.equals("edit")) hideMenu();
             else if (tag.equals("keyboard")) {
-                profile.keyCapture = !profile.keyCapture; store.upsert(profile);
-                setKeyCapture(profile.keyCapture); refreshMenu();
+                setKeyCapture(!keysOn);
+                refreshMenu();
             } else if (tag.equals("mouse")) {
                 profile.aimEnabled = !profile.aimEnabled; store.upsert(profile);
                 reload(); refreshMenu();
@@ -491,7 +491,7 @@ public class OverlayService extends Service {
             if (tag.equals("master")) {
                 tv.setText(masterOn ? "⏻  MASTER: ON" : "⏻  MASTER: OFF");
                 tv.setTextColor(masterOn ? 0xFF22C55E : 0xFFEF4444);
-            } else if (tag.equals("keyboard")) tv.setText("⌨  Keyboard: " + onOff(profile.keyCapture));
+            } else if (tag.equals("keyboard")) tv.setText("⌨  Keyboard: " + onOff(keysOn));
             else if (tag.equals("mouse")) tv.setText("🖱  Mouse: " + onOff(profile.aimEnabled));
             else if (tag.equals("joystick")) tv.setText("🕹  Joystick: " + onOff(profile.joystick));
             else if (tag.equals("fire")) tv.setText("🔥  Fire button: " + onOff(profile.fireBtn));
@@ -526,11 +526,8 @@ public class OverlayService extends Service {
         if (fireBtn != null) fireBtn.setVisibility(on ? View.VISIBLE : View.GONE);
         if (aimPad != null) aimPad.setVisibility(on ? View.VISIBLE : View.GONE);
         if (bubble != null) { bubble.masterOn = on; bubble.invalidate(); }
-        if (!on) {
-            setKeyCapture(false);
-        } else {
-            setKeyCapture(profile.keyCapture);
-        }
+        // keysOn waisa hi rehta hai — master off/on karne se keyboard setting na badle
+        if (bubble != null) { bubble.masterOn = on; bubble.keysOn = keysOn; bubble.invalidate(); }
     }
 
     /* ---- keyboard capture window (sirf jab user chahe) ---- */
@@ -538,11 +535,9 @@ public class OverlayService extends Service {
     private WindowManager.LayoutParams keyParams;
 
     private void setKeyCapture(boolean on) {
-        profile.keyCapture = on;
-        store.upsert(profile);
-        // Ab koi focusable window nahi — keys AccessibilityService se aati hain.
+        keysOn = on;
+        if (profile != null) { profile.keyCapture = on; store.upsert(profile); }
         if (bubble != null) { bubble.keysOn = on; bubble.invalidate(); }
-        return;
     }
 
 
@@ -582,7 +577,8 @@ public class OverlayService extends Service {
     private boolean dispatching = false;
 
     private void handleKey(String keyName) {
-        if (editMode || !keyMode || profile == null) return;
+        if (editMode || profile == null) return;
+        if (!masterOn || !keysOn) return;
         if (dispatching) return;          // recursion guard (aim pad → fire → aim pad)
         dispatching = true;
         try {
