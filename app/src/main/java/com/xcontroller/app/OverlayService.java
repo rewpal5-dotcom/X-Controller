@@ -21,6 +21,10 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.graphics.drawable.GradientDrawable;
+import android.view.View;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +47,9 @@ public class OverlayService extends Service {
     private BubbleView bubble;
     private JoystickView joystick;
     private AimPadView aimPad;
-    private WindowManager.LayoutParams panelParams, bubbleParams, joyParams, aimParams;
+    private LinearLayout menu;
+    private WindowManager.LayoutParams panelParams, bubbleParams, joyParams, aimParams, menuParams;
+    private boolean masterOn = false;   // jab tak user ON na kare, phone normal chalta rahe
 
     private ProfileStore store;
     private ProfileStore.Profile profile;
@@ -138,8 +144,8 @@ public class OverlayService extends Service {
         bubble = new BubbleView(this);
         bubble.keysOn = profile.keyCapture;
         bubble.callback = new BubbleView.Callback() {
-            public void onTap() { setEditMode(!editMode); }
-            public void onLongPress() { setKeyCapture(!profile.keyCapture); }
+            public void onTap() { toggleMenu(); }
+            public void onLongPress() { setEditMode(!editMode); }
         };
         bubbleParams = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -153,6 +159,9 @@ public class OverlayService extends Service {
         bubbleParams.y = Math.max(120, h / 3);
 
         try { wm.addView(bubble, bubbleParams); } catch (Exception ignored) { }
+
+        buildMenu(type);
+        applyMaster(masterOn);
 
         if (profile.keyCapture) setKeyCapture(true);
 
@@ -178,6 +187,7 @@ public class OverlayService extends Service {
             joyParams.x = (int) (profile.joyX * w);
             joyParams.y = (int) (profile.joyY * h);
             try { wm.addView(joystick, joyParams); } catch (Exception ignored) { }
+            joystick.setVisibility(View.GONE);
         }
 
         /* ---- mouse aim pad (mouse hilane par camera ghumana) ---- */
@@ -188,7 +198,7 @@ public class OverlayService extends Service {
                 public void onFire() { handleKey("MOUSE_LEFT"); }
             };
             aimParams = new WindowManager.LayoutParams(
-                    profile.aimZone.equals("full") ? WindowManager.LayoutParams.MATCH_PARENT : (int) (w * 0.62f),
+                    profile.aimZone.equals("full") ? WindowManager.LayoutParams.MATCH_PARENT : (int) (w * 0.45f),
                     WindowManager.LayoutParams.MATCH_PARENT,
                     type,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -197,6 +207,7 @@ public class OverlayService extends Service {
                     PixelFormat.TRANSLUCENT);
             aimParams.gravity = Gravity.TOP | Gravity.END;
             try { wm.addView(aimPad, aimParams); } catch (Exception ignored) { }
+            aimPad.setVisibility(View.GONE);
         }
     }
 
@@ -244,6 +255,129 @@ public class OverlayService extends Service {
         sx = Math.max(dm.widthPixels * 0.55f, Math.min(dm.widthPixels - 8, sx));
         sy = Math.max(8, Math.min(dm.heightPixels - 8, sy));
         svc.swipe(cx, cy, sx, sy, 55);
+    }
+
+
+    /* ===================== floating menu ===================== */
+    private void buildMenu(int type) {
+        menu = new LinearLayout(this);
+        menu.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(0xF00B0F17);
+        g.setCornerRadius(30f);
+        g.setStroke(3, 0xFF22D3EE);
+        menu.setBackground(g);
+        menu.setPadding(26, 22, 26, 22);
+
+        menu.addView(menuTitle("X CONTROLLER"));
+        menu.addView(menuBtn("master", masterOn ? "⏻  MASTER: ON" : "⏻  MASTER: OFF", true));
+        menu.addView(menuBtn("keyboard", "⌨  Keyboard: " + onOff(profile.keyCapture), false));
+        menu.addView(menuBtn("mouse", "🖱  Mouse: " + onOff(profile.aimEnabled), false));
+        menu.addView(menuBtn("joystick", "🕹  Joystick: " + onOff(profile.joystick), false));
+        menu.addView(menuBtn("edit", "✎  Layout edit karein", false));
+        menu.addView(menuBtn("close", "✕  Controller band karein", false));
+
+        menuParams = new WindowManager.LayoutParams(
+                (int) (250 * getResources().getDisplayMetrics().density),
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                PixelFormat.TRANSLUCENT);
+        menuParams.gravity = Gravity.TOP | Gravity.START;
+        menuParams.x = 90;
+        menuParams.y = 200;
+        menu.setVisibility(View.GONE);
+        try { wm.addView(menu, menuParams); } catch (Exception ignored) { }
+    }
+
+    private String onOff(boolean b) { return b ? "ON" : "OFF"; }
+
+    private TextView menuTitle(String t) {
+        TextView v = new TextView(this);
+        v.setText(t);
+        v.setTextColor(0xFF22D3EE);
+        v.setTextSize(13f);
+        v.setTypeface(null, android.graphics.Typeface.BOLD);
+        v.setPadding(0, 0, 0, 14);
+        return v;
+    }
+
+    private TextView menuBtn(String id, String label, boolean highlight) {
+        TextView v = new TextView(this);
+        v.setText(label);
+        v.setTextColor(highlight ? 0xFF22C55E : 0xFFEAF2FF);
+        v.setTextSize(15f);
+        v.setPadding(6, 18, 6, 18);
+        v.setTag(id);
+        v.setOnClickListener(x -> {
+            String tag = String.valueOf(v.getTag());
+            if (tag.equals("master")) toggleMaster();
+            else if (tag.equals("keyboard")) {
+                profile.keyCapture = !profile.keyCapture; store.upsert(profile);
+                setKeyCapture(profile.keyCapture); refreshMenu();
+            } else if (tag.equals("mouse")) {
+                profile.aimEnabled = !profile.aimEnabled; store.upsert(profile);
+                reload(); refreshMenu();
+            } else if (tag.equals("joystick")) {
+                profile.joystick = !profile.joystick; store.upsert(profile);
+                reload(); refreshMenu();
+            } else if (tag.equals("edit")) {
+                hideMenu(); setEditMode(true);
+            } else if (tag.equals("close")) {
+                stopSelf();
+            }
+        });
+        return v;
+    }
+
+    private void refreshMenu() {
+        if (menu == null) return;
+        for (int i = 0; i < menu.getChildCount(); i++) {
+            View c = menu.getChildAt(i);
+            if (!(c instanceof TextView) || c.getTag() == null) continue;
+            String tag = String.valueOf(c.getTag());
+            TextView tv = (TextView) c;
+            if (tag.equals("master")) {
+                tv.setText(masterOn ? "⏻  MASTER: ON" : "⏻  MASTER: OFF");
+                tv.setTextColor(masterOn ? 0xFF22C55E : 0xFFEF4444);
+            } else if (tag.equals("keyboard")) tv.setText("⌨  Keyboard: " + onOff(profile.keyCapture));
+            else if (tag.equals("mouse")) tv.setText("🖱  Mouse: " + onOff(profile.aimEnabled));
+            else if (tag.equals("joystick")) tv.setText("🕹  Joystick: " + onOff(profile.joystick));
+        }
+    }
+
+    private void toggleMenu() {
+        if (menu == null) return;
+        if (menu.getVisibility() == View.VISIBLE) hideMenu();
+        else {
+            refreshMenu();
+            menu.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void hideMenu() {
+        if (menu != null) menu.setVisibility(View.GONE);
+    }
+
+    /* ===================== master switch ===================== */
+    private void toggleMaster() {
+        masterOn = !masterOn;
+        applyMaster(masterOn);
+        refreshMenu();
+    }
+
+    private void applyMaster(boolean on) {
+        masterOn = on;
+        if (panel != null) panel.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (joystick != null) joystick.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (aimPad != null) aimPad.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (bubble != null) { bubble.masterOn = on; bubble.invalidate(); }
+        if (!on) {
+            setKeyCapture(false);
+        } else {
+            setKeyCapture(profile.keyCapture);
+        }
     }
 
     /* ---- keyboard capture window (sirf jab user chahe) ---- */
@@ -326,6 +460,7 @@ public class OverlayService extends Service {
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
         try { if (joystick != null) wm.removeView(joystick); } catch (Exception ignored) { }
         try { if (aimPad != null) wm.removeView(aimPad); } catch (Exception ignored) { }
+        try { if (menu != null) wm.removeView(menu); } catch (Exception ignored) { }
         try { if (keySink != null) wm.removeView(keySink); } catch (Exception ignored) { }
         panel = null; bubble = null; joystick = null; aimPad = null; keySink = null;
         editMode = false;
@@ -342,6 +477,7 @@ public class OverlayService extends Service {
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
         try { if (joystick != null) wm.removeView(joystick); } catch (Exception ignored) { }
         try { if (aimPad != null) wm.removeView(aimPad); } catch (Exception ignored) { }
+        try { if (menu != null) wm.removeView(menu); } catch (Exception ignored) { }
         super.onDestroy();
     }
 
@@ -353,6 +489,7 @@ public class OverlayService extends Service {
         interface Callback { void onTap(); void onLongPress(); }
         Callback callback;
         boolean keysOn = false;
+        boolean masterOn = false;
         private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -382,8 +519,9 @@ public class OverlayService extends Service {
             float r = size / 2f;
             c.drawCircle(r, r, r - 4, bg);
             c.drawCircle(r, r, r - 4, ring);
-            txt.setColor(keysOn ? 0xFF22C55E : 0xFF22D3EE);
-            ring.setColor(keysOn ? 0xFF22C55E : 0xFF22D3EE);
+            int col = masterOn ? (keysOn ? 0xFF22C55E : 0xFF22D3EE) : 0xFF64748B;
+            txt.setColor(col);
+            ring.setColor(col);
             c.drawCircle(r, r, r - 4, ring);
             c.drawText("X", r, r + size * 0.15f, txt);
         }

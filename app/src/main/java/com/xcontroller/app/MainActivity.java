@@ -49,6 +49,16 @@ public class MainActivity extends Activity {
         st.addView(statusLine("Floating permission", canOverlay(), "Permission dein"));
         box.addView(st);
 
+        /* ---- setup steps ---- */
+        LinearLayout setup = UiKit.card(this);
+        setup.addView(UiKit.title(this, "Setup (2 step)", 15));
+        setup.addView(UiKit.body(this,
+                "1. Dono permissions ✅ karein\n"
+              + "2. Start Controller → floating X button aa jaayega\n"
+              + "3. X par tap → menu: MASTER ON karein, phir Keyboard / Mouse / Joystick\n"
+              + "   jiski zaroorat ho use ON karein", 13.5f, UiKit.MUTED));
+        box.addView(setup);
+
         /* ---- primary ---- */
         Button start = UiKit.button(this, "▶  Start Controller", UiKit.ACCENT, 0xFF04121A);
         start.setOnClickListener(v -> startController());
