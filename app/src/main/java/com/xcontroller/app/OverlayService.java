@@ -118,24 +118,29 @@ public class OverlayService extends Service {
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
 
+        // Panel sirf controls ke aas-paas ka chhota area leta hai (poori screen nahi) —
+        // isse game freeze/pause nahi hota.
+        int[] box = panel.contentBox();
         panelParams = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
+                box[2], box[3],
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 PixelFormat.TRANSLUCENT);
         panelParams.gravity = Gravity.TOP | Gravity.START;
+        panelParams.x = box[0];
+        panelParams.y = box[1];
 
         try { wm.addView(panel, panelParams); } catch (Exception ignored) { }
 
         /* ---- floating bubble ---- */
         bubble = new BubbleView(this);
+        bubble.keysOn = profile.keyCapture;
         bubble.callback = new BubbleView.Callback() {
             public void onTap() { setEditMode(!editMode); }
-            public void onLongPress() { setEditMode(true); }
+            public void onLongPress() { setKeyCapture(!profile.keyCapture); }
         };
         bubbleParams = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -149,6 +154,8 @@ public class OverlayService extends Service {
         bubbleParams.y = Math.max(120, h / 3);
 
         try { wm.addView(bubble, bubbleParams); } catch (Exception ignored) { }
+
+        if (profile.keyCapture) setKeyCapture(true);
 
         /* ---- joystick (gol circle wala movement control) ---- */
         if (profile.joystick) {
@@ -174,7 +181,7 @@ public class OverlayService extends Service {
         }
 
         /* ---- mouse aim pad (mouse hilane par camera ghumana) ---- */
-        if (profile.aimEnabled) {
+        if (profile.aimEnabled) {   // default OFF — full-screen touch layer games ko rok deta hai
             aimPad = new AimPadView(this, profile, w, h);
             aimPad.callback = new AimPadView.Callback() {
                 public void onMove(float dx, float dy) { aimBy(dx, dy); }
@@ -230,13 +237,55 @@ public class OverlayService extends Service {
         svc.swipe(cx, cy, sx, sy, 55);
     }
 
+    /* ---- keyboard capture window (sirf jab user chahe) ---- */
+    private KeySinkView keySink;
+    private WindowManager.LayoutParams keyParams;
+
+    private void setKeyCapture(boolean on) {
+        profile.keyCapture = on;
+        store.upsert(profile);
+        if (on && keySink == null) {
+            keySink = new KeySinkView(this);
+            keySink.callback = new KeySinkView.Callback() {
+                public void onKey(String k) { handleKey(k); }
+            };
+            int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    : WindowManager.LayoutParams.TYPE_PHONE;
+            keyParams = new WindowManager.LayoutParams(2, 2, type,
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    PixelFormat.TRANSLUCENT);
+            keyParams.gravity = Gravity.TOP | Gravity.START;
+            keyParams.x = 0; keyParams.y = 0;
+            try { wm.addView(keySink, keyParams); } catch (Exception ignored) { }
+        } else if (!on && keySink != null) {
+            try { wm.removeView(keySink); } catch (Exception ignored) { }
+            keySink = null;
+        }
+        if (bubble != null) { bubble.keysOn = on; bubble.invalidate(); }
+    }
+
     private void setEditMode(boolean on) {
         editMode = on;
         panel.editMode = on;
         panel.invalidate();
         if (panelParams != null && wm != null) {
-            if (on) panelParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-            else panelParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            DisplayMetrics dm = getResources().getDisplayMetrics();
+            if (on) {
+                panelParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+                panelParams.flags &= ~WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                panelParams.width = WindowManager.LayoutParams.MATCH_PARENT;
+                panelParams.height = WindowManager.LayoutParams.MATCH_PARENT;
+                panelParams.x = 0; panelParams.y = 0;
+            } else {
+                int[] box = panel.contentBox();
+                panelParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+                panelParams.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+                panelParams.width = box[2];
+                panelParams.height = box[3];
+                panelParams.x = box[0]; panelParams.y = box[1];
+            }
             try { wm.updateViewLayout(panel, panelParams); } catch (Exception ignored) { }
         }
         if (!on) {
@@ -278,6 +327,7 @@ public class OverlayService extends Service {
     static class BubbleView extends View {
         interface Callback { void onTap(); void onLongPress(); }
         Callback callback;
+        boolean keysOn = false;
         private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -306,6 +356,9 @@ public class OverlayService extends Service {
         protected void onDraw(Canvas c) {
             float r = size / 2f;
             c.drawCircle(r, r, r - 4, bg);
+            c.drawCircle(r, r, r - 4, ring);
+            txt.setColor(keysOn ? 0xFF22C55E : 0xFF22D3EE);
+            ring.setColor(keysOn ? 0xFF22C55E : 0xFF22D3EE);
             c.drawCircle(r, r, r - 4, ring);
             c.drawText("X", r, r + size * 0.15f, txt);
         }
@@ -396,6 +449,25 @@ public class OverlayService extends Service {
             label.setTextAlign(Paint.Align.CENTER);
             bar.setColor(0xF00B0F17);
             accent.setColor(0xFF22D3EE);
+        }
+
+        /** Saare controls ko cover karne wala chhota box: {x, y, w, h} */
+        int[] contentBox() {
+            int w = getWidth() > 0 ? getWidth() : screenW;
+            int h = getHeight() > 0 ? getHeight() : screenH;
+            if (bindings.isEmpty()) return new int[]{0, 0, 4, 4};
+            float minX = 1f, minY = 1f, maxX = 0f, maxY = 0f;
+            for (ProfileStore.Binding b : bindings) {
+                float r = radius(b) / Math.max(1, w);
+                float ry = radius(b) / Math.max(1, h);
+                minX = Math.min(minX, b.x - r); maxX = Math.max(maxX, b.x + r);
+                minY = Math.min(minY, b.y - ry); maxY = Math.max(maxY, b.y + ry);
+            }
+            int x = Math.max(0, (int) (minX * w) - 10);
+            int y = Math.max(0, (int) (minY * h) - 10);
+            int cw = Math.min(w - x, (int) ((maxX - minX) * w) + 20);
+            int ch = Math.min(h - y, (int) ((maxY - minY) * h) + 20);
+            return new int[]{x, y, Math.max(8, cw), Math.max(8, ch)};
         }
 
         private float radius(ProfileStore.Binding b) {
@@ -677,6 +749,57 @@ public class OverlayService extends Service {
                 case KeyEvent.KEYCODE_DPAD_DOWN: return "DOWN";
                 case KeyEvent.KEYCODE_DPAD_LEFT: return "LEFT";
                 case KeyEvent.KEYCODE_DPAD_RIGHT: return "RIGHT";
+                default: return null;
+            }
+        }
+    }
+
+    /* ===================== key capture window ===================== */
+    static class KeySinkView extends View {
+        interface Callback { void onKey(String key); }
+        Callback callback;
+
+        KeySinkView(Context c) {
+            super(c);
+            setFocusable(true);
+            setFocusableInTouchMode(true);
+        }
+
+        @Override
+        public boolean onKeyDown(int code, KeyEvent event) {
+            String n = name(code);
+            if (n != null && callback != null) { callback.onKey(n); return true; }
+            return super.onKeyDown(code, event);
+        }
+
+        @Override
+        public boolean onGenericMotionEvent(MotionEvent e) {
+            if (e.getActionMasked() == MotionEvent.ACTION_BUTTON_PRESS) {
+                int b = e.getButtonState();
+                String n = null;
+                if ((b & MotionEvent.BUTTON_PRIMARY) != 0) n = "MOUSE_LEFT";
+                else if ((b & MotionEvent.BUTTON_SECONDARY) != 0) n = "MOUSE_RIGHT";
+                else if ((b & MotionEvent.BUTTON_TERTIARY) != 0) n = "MOUSE_MIDDLE";
+                if (n != null && callback != null) { callback.onKey(n); return true; }
+            }
+            return super.onGenericMotionEvent(e);
+        }
+
+        private String name(int code) {
+            if (code >= KeyEvent.KEYCODE_A && code <= KeyEvent.KEYCODE_Z)
+                return String.valueOf((char) ('A' + (code - KeyEvent.KEYCODE_A)));
+            if (code >= KeyEvent.KEYCODE_0 && code <= KeyEvent.KEYCODE_9)
+                return String.valueOf((char) ('0' + (code - KeyEvent.KEYCODE_0)));
+            switch (code) {
+                case KeyEvent.KEYCODE_SPACE: return "SPACE";
+                case KeyEvent.KEYCODE_SHIFT_LEFT:
+                case KeyEvent.KEYCODE_SHIFT_RIGHT: return "SHIFT";
+                case KeyEvent.KEYCODE_CTRL_LEFT:
+                case KeyEvent.KEYCODE_CTRL_RIGHT: return "CTRL";
+                case KeyEvent.KEYCODE_ALT_LEFT:
+                case KeyEvent.KEYCODE_ALT_RIGHT: return "ALT";
+                case KeyEvent.KEYCODE_TAB: return "TAB";
+                case KeyEvent.KEYCODE_ESCAPE: return "ESC";
                 default: return null;
             }
         }

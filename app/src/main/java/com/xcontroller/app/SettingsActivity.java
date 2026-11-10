@@ -46,6 +46,20 @@ public class SettingsActivity extends Activity {
         c.addView(inv, UiKit.matchWrap(10));
         box.addView(c);
 
+        LinearLayout cKey = UiKit.card(this);
+        cKey.addView(UiKit.title(this, "Keyboard capture", 15));
+        Switch kc = new Switch(this);
+        kc.setText("Keyboard se mapping chalu karein");
+        kc.setTextColor(UiKit.TEXT);
+        kc.setChecked(profile.keyCapture);
+        kc.setOnCheckedChangeListener((v, on) -> { profile.keyCapture = on; save(); });
+        cKey.addView(kc, UiKit.matchWrap(8));
+        cKey.addView(UiKit.muted(this,
+                "OFF (default) = game bilkul normal chalta hai, sirf joystick aur touch buttons kaam karte hain.\n"
+              + "ON = keyboard keys pakdi jaati hain. Kuch games focus badalne par pause ho jaate hain —\n"
+              + "aisi haalat mein ise OFF kar dein ya overlay ke X button ko long-press karein."));
+        box.addView(cKey);
+
         LinearLayout cJoy = UiKit.card(this);
         cJoy.addView(UiKit.title(this, "Joystick (gol circle)", 15));
         Switch joy = new Switch(this);
