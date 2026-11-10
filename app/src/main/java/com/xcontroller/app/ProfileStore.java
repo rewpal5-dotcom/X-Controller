@@ -47,7 +47,6 @@ public class ProfileStore {
         // mouse aim (mouse hilane par camera ghumana — swipe se)
         public boolean aimEnabled = true;
         public String aimZone = "right";           // right / full
-        public int aimSensitivity = 50;
 
         public Profile() {}
         public Profile(String name) { this.name = name; }
