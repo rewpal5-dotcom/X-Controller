@@ -114,34 +114,13 @@ public class OverlayService extends Service {
         int w = dm.widthPixels, h = dm.heightPixels;
 
         /* ---- full screen controls layer ---- */
-        panel = new PanelView(this, profile, w, h);
-        panel.callback = new PanelView.Callback() {
-            public void onKey(String key) { handleKey(key); }
-            public void onEditToggle() { setEditMode(!editMode); }
-            public void onClose() { stopSelf(); }
-            public void onKeyToggle() { keyMode = !keyMode; panel.keyMode = keyMode; panel.invalidate(); }
-            public void onChanged() { store.upsert(profile); }
-        };
-
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 : WindowManager.LayoutParams.TYPE_PHONE;
 
-        // Panel poore screen par hai, lekin NOT_TOUCHABLE + NOT_FOCUSABLE —
-        // isliye game ko bilkul chhoota nahi (koi freeze nahi), aur drawing sahi jagah hoti hai.
-        panelParams = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                type,
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT);
-        panelParams.gravity = Gravity.TOP | Gravity.START;
-        panelParams.x = 0; panelParams.y = 0;
-
-        try { wm.addView(panel, panelParams); } catch (Exception ignored) { }
+        // Har control apni chhoti window hai — poore screen par koi touchable layer nahi,
+        // isliye phone/game ki touch hamesha kaam karti hai.
+        buildControls(type);
 
         /* ---- floating bubble ---- */
         bubble = new BubbleView(this);
@@ -289,6 +268,130 @@ public class OverlayService extends Service {
     }
 
 
+    /* ===================== per-control windows ===================== */
+    private final java.util.List<ControlView> controlViews = new java.util.ArrayList<>();
+
+    private void buildControls(int type) {
+        clearControls();
+        if (profile == null) return;
+        for (ProfileStore.Binding b : profile.bindings) {
+            ControlView v = new ControlView(this, profile, b);
+            v.callback = new ControlView.Callback() {
+                public void onTap(ProfileStore.Binding bb) { fireAt(bb); }
+                public void onMoved(ProfileStore.Binding bb) { store.upsert(profile); }
+                public void onLongPress(ProfileStore.Binding bb) { showKeyMenu(bb); }
+            };
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    type,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            lp.gravity = Gravity.TOP | Gravity.START;
+            int[] sc = screen();
+            lp.x = (int) (b.x * sc[0]);
+            lp.y = (int) (b.y * sc[1]);
+            v.params = lp;
+            try { wm.addView(v, lp); } catch (Exception ignored) { }
+            v.setVisibility(masterOn ? View.VISIBLE : View.GONE);
+            controlViews.add(v);
+        }
+    }
+
+    private void clearControls() {
+        for (ControlView v : controlViews) {
+            try { wm.removeView(v); } catch (Exception ignored) { }
+        }
+        controlViews.clear();
+    }
+
+    private void fireAt(ProfileStore.Binding b) {
+        KeyAccessibilityService svc = KeyAccessibilityService.get();
+        if (svc == null || profile == null) return;
+        int[] sc = screen();
+        svc.tap(b.x * sc[0] + 4, b.y * sc[1] + 4);
+    }
+
+    /* ---- key chooser (chhoti window) ---- */
+    private LinearLayout keyMenu;
+
+    private void showKeyMenu(final ProfileStore.Binding b) {
+        hideKeyMenu();
+        keyMenu = new LinearLayout(this);
+        keyMenu.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(0xF00B0F17); g.setCornerRadius(26f); g.setStroke(3, 0xFFA855F7);
+        keyMenu.setBackground(g);
+        keyMenu.setPadding(20, 18, 20, 18);
+
+        TextView head = new TextView(this);
+        head.setText("Key chunein (" + b.key + ")");
+        head.setTextColor(0xFFA855F7);
+        head.setTextSize(13f);
+        head.setPadding(0, 0, 0, 10);
+        keyMenu.addView(head);
+
+        String[] keys = {"A","B","C","D","E","F","G","H","I","J","K","L","M",
+                         "N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
+                         "SPACE","SHIFT","CTRL","TAB","MOUSE_LEFT","MOUSE_RIGHT","SCROLL_UP","SCROLL_DOWN"};
+        LinearLayout row = null;
+        for (int i = 0; i < keys.length; i++) {
+            if (i % 6 == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                keyMenu.addView(row);
+            }
+            final String k = keys[i];
+            TextView tv = new TextView(this);
+            tv.setText(k.length() > 3 ? k.substring(0, 3) : k);
+            tv.setTextColor(0xFFEAF2FF);
+            tv.setTextSize(12f);
+            tv.setPadding(12, 14, 12, 14);
+            tv.setOnClickListener(x -> {
+                b.key = k;
+                store.upsert(profile);
+                hideKeyMenu();
+                buildControls(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE);
+            });
+            row.addView(tv);
+        }
+
+        TextView del = new TextView(this);
+        del.setText("🗑  Ye button delete karein");
+        del.setTextColor(0xFFEF4444);
+        del.setTextSize(13f);
+        del.setPadding(0, 16, 0, 4);
+        del.setOnClickListener(x -> {
+            profile.bindings.remove(b);
+            store.upsert(profile);
+            hideKeyMenu();
+            buildControls(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    : WindowManager.LayoutParams.TYPE_PHONE);
+        });
+        keyMenu.addView(del);
+
+        int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE;
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                (int) (260 * getResources().getDisplayMetrics().density),
+                WindowManager.LayoutParams.WRAP_CONTENT, type,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.CENTER;
+        try { wm.addView(keyMenu, lp); } catch (Exception ignored) { }
+    }
+
+    private void hideKeyMenu() {
+        if (keyMenu != null) {
+            try { wm.removeView(keyMenu); } catch (Exception ignored) { }
+            keyMenu = null;
+        }
+    }
+
     /* ===================== floating menu ===================== */
     private void buildMenu(int type) {
         menu = new LinearLayout(this);
@@ -306,7 +409,8 @@ public class OverlayService extends Service {
         menu.addView(menuBtn("mouse", "🖱  Mouse: " + onOff(profile.aimEnabled), false));
         menu.addView(menuBtn("joystick", "🕹  Joystick: " + onOff(profile.joystick), false));
         menu.addView(menuBtn("fire", "🔥  Fire button: " + onOff(profile.fireBtn), false));
-        menu.addView(menuBtn("edit", "✎  Layout edit karein", false));
+        menu.addView(menuBtn("add", "＋  Naya button add karein", false));
+        menu.addView(menuBtn("edit", "✎  Poora editor kholein", false));
         menu.addView(menuBtn("close", "✕  Controller band karein", false));
 
         menuParams = new WindowManager.LayoutParams(
@@ -358,6 +462,15 @@ public class OverlayService extends Service {
             } else if (tag.equals("joystick")) {
                 profile.joystick = !profile.joystick; store.upsert(profile);
                 reload(); refreshMenu();
+            } else if (tag.equals("add")) {
+                ProfileStore.Binding nb = new ProfileStore.Binding("NEW", 0.5f, 0.5f, "");
+                profile.bindings.add(nb);
+                store.upsert(profile);
+                hideMenu();
+                buildControls(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE);
+                showKeyMenu(nb);
             } else if (tag.equals("edit")) {
                 hideMenu(); setEditMode(true);
             } else if (tag.equals("close")) {
@@ -407,6 +520,7 @@ public class OverlayService extends Service {
     private void applyMaster(boolean on) {
         masterOn = on;
         if (panel != null) panel.setVisibility(on ? View.VISIBLE : View.GONE);
+        for (ControlView v : controlViews) v.setVisibility(on ? View.VISIBLE : View.GONE);
         if (joystick != null) joystick.setVisibility(on ? View.VISIBLE : View.GONE);
         if (fireBtn != null) fireBtn.setVisibility(on ? View.VISIBLE : View.GONE);
         if (aimPad != null) aimPad.setVisibility(on ? View.VISIBLE : View.GONE);
@@ -530,6 +644,8 @@ public class OverlayService extends Service {
         try { if (keySink != null) wm.removeView(keySink); } catch (Exception ignored) { }
         try { if (fireBtn != null) wm.removeView(fireBtn); } catch (Exception ignored) { }
         fireBtn = null;
+        clearControls();
+        hideKeyMenu();
         panel = null; bubble = null; joystick = null; aimPad = null; keySink = null;
         editMode = false;
         profile = store.active();
@@ -548,6 +664,8 @@ public class OverlayService extends Service {
     public void onDestroy() {
         running = false;
         instance = null;
+        clearControls();
+        hideKeyMenu();
         try { if (panel != null) wm.removeView(panel); } catch (Exception ignored) { }
         try { if (bubble != null) wm.removeView(bubble); } catch (Exception ignored) { }
         try { if (joystick != null) wm.removeView(joystick); } catch (Exception ignored) { }
@@ -1283,6 +1401,87 @@ public class OverlayService extends Service {
             if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
                 if (callback != null) callback.onFire();
                 return true;
+            }
+            return super.onTouchEvent(e);
+        }
+    }
+
+
+    /* ===================== ek control button (apni window) ===================== */
+    static class ControlView extends View {
+        interface Callback {
+            void onTap(ProfileStore.Binding b);
+            void onMoved(ProfileStore.Binding b);
+            void onLongPress(ProfileStore.Binding b);
+        }
+        Callback callback;
+        WindowManager.LayoutParams params;
+        private final ProfileStore.Profile profile;
+        private final ProfileStore.Binding binding;
+        private final int radius;
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint txt = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private long downAt;
+        private boolean dragged;
+
+        ControlView(Context c, ProfileStore.Profile p, ProfileStore.Binding b) {
+            super(c);
+            profile = p;
+            binding = b;
+            radius = (int) Math.max(30, Math.min(64, 44 * p.buttonSize * (b.size <= 0 ? 1 : b.size)));
+            fill.setColor(0x5522D3EE);
+            ring.setColor(0xCC22D3EE);
+            ring.setStyle(Paint.Style.STROKE);
+            ring.setStrokeWidth(4f);
+            txt.setColor(0xFFFFFFFF);
+            txt.setTextAlign(Paint.Align.CENTER);
+            txt.setTextSize(radius * 0.6f);
+            setAlpha(0.95f);
+        }
+
+        @Override
+        protected void onMeasure(int w, int h) { setMeasuredDimension(radius * 2, radius * 2); }
+
+        @Override
+        protected void onDraw(Canvas c) {
+            float r = radius;
+            c.drawCircle(r, r, r - 5, fill);
+            c.drawCircle(r, r, r - 5, ring);
+            c.drawText(binding.key, r, r + radius * 0.2f, txt);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downAt = System.currentTimeMillis();
+                    dragged = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE: {
+                    if (System.currentTimeMillis() - downAt > 350) {
+                        dragged = true;
+                        if (params != null) {
+                            params.x = (int) (e.getRawX() - radius);
+                            params.y = (int) (e.getRawY() - radius);
+                            try { wm.updateViewLayout(this, params); } catch (Exception ignored) { }
+                        }
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_UP:
+                    if (dragged) {
+                        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+                        binding.x = Math.max(0.02f, Math.min(0.98f, (params.x + radius) / (float) dm.widthPixels));
+                        binding.y = Math.max(0.02f, Math.min(0.98f, (params.y + radius) / (float) dm.heightPixels));
+                        if (callback != null) callback.onMoved(binding);
+                    } else if (System.currentTimeMillis() - downAt > 900) {
+                        if (callback != null) callback.onLongPress(binding);
+                    } else {
+                        if (callback != null) callback.onTap(binding);
+                    }
+                    return true;
             }
             return super.onTouchEvent(e);
         }
